@@ -19,11 +19,22 @@ import base64
 # PAGE CONFIGURATION
 # ================================================================================
 st.set_page_config(
-    page_title="Dashboard gemeentelijke inkomensafhankelijke regelingen 2025",
+    page_title="Dashboard gemeentelijke inkomensafhankelijke regelingen",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Custom CSS for layout
+st.markdown("""
+<style>
+    /* Increase sidebar width */
+    [data-testid="stSidebar"] {
+        min-width: 320px;
+        max-width: 320px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ================================================================================
 # HELPER FUNCTIONS
@@ -63,6 +74,7 @@ def add_logo_to_figure(fig, logo_base64):
 @st.cache_data
 def load_data():
     """Load all required data from Excel file and merge municipality information"""
+#    excel_url = "dataoverzicht_dashboard_armoedebeleid.xlsx"
     excel_url = st.secrets["excel_url"]
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
@@ -151,7 +163,7 @@ def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0,cav=0, result="sum",
     results = []
     for _, row in filtered.iterrows():
         results.append({
-            'name': row['NM'],
+            'name': row['N4'],
             'amount': row[wrd_column] / 12
         })
 
@@ -191,11 +203,11 @@ try:
     gemeente_labels = {str(row['GMcode']): str(row['Gemeentenaam']) for _, row in gemeenten_df.iterrows()}
 
     # ----------------------------------------------------------------------------
-    # Selectors (shown above tabs)
+    # Selectors (in sidebar)
     # ----------------------------------------------------------------------------
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+    with st.sidebar:
+        st.header("Filters")
 
-    with col1:
         selected_income_pct = st.slider(
             "Inkomen:",
             min_value=100,
@@ -208,7 +220,6 @@ try:
         st.session_state['selected_income_pct'] = selected_income_pct
         selected_income = selected_income_pct / 100
 
-    with col2:
         default_gemeente = st.session_state.get('selected_gemeente', 'GM0363')
         selected_gemeente = st.selectbox(
             "Gemeente:",
@@ -219,7 +230,6 @@ try:
         )
         st.session_state['selected_gemeente'] = selected_gemeente
 
-    with col3:
         selected_huishouden = st.selectbox(
             "Huishouden:",
             options=list(household_labels.keys()),
@@ -229,7 +239,6 @@ try:
         )
         st.session_state['selected_huishouden'] = selected_huishouden
 
-    with col4:
         selected_referteperiode = st.pills(
             "Jaren met laag inkomen:",
             options=[0, 1, 2, 3, 4, 5],
@@ -238,7 +247,6 @@ try:
         )
         st.session_state['selected_referteperiode'] = selected_referteperiode
 
-    with col5:
         regelingen_filter = st.multiselect(
             "Type regelingen:",
             options=["Formele regelingen", "Informele regelingen", "Korting gemeentepolis"],
@@ -246,6 +254,22 @@ try:
             key="regelingen"
         )
         st.session_state['regelingen_filter'] = regelingen_filter
+
+        # Legend
+        st.markdown("---")
+        st.markdown("**Legenda**")
+        st.markdown(f"""
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #EF553B;"></div>
+                <span>{gemeente_labels[selected_gemeente]}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #B0B0B0;"></div>
+                <span>Overige gemeenten</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # Calculate CAV/FR parameters
     selected_cav = 1 if "Korting gemeentepolis" in regelingen_filter else 0
@@ -260,20 +284,23 @@ try:
     else:
         selected_fr = "all"
 
-    # Create tabs for the graphs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "1. Waarde per huishouden",
-        "2. Waarde per inkomensgroep",
-        "3. Formele en informele regelingen",
-        "4. Waarden en inkomensgrenzen"
-    ])
+    # Create two-column layout: graphs on left, table on right
+    graph_col, table_col = st.columns([2, 1])
+
+    with graph_col:
+        # Create tabs for the graphs
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Huishoudtypen",
+            "Inkomensgroepen",
+            "(In)formeel",
+            "Waarden en Inkomensgrenzen"
+        ])
 
     # ----------------------------------------------------------------------------
     # Graph 1: Box Plot - Value by Household Type
     # ----------------------------------------------------------------------------
     with tab1:
-        st.header("1. Waarde inkomensafhankelijke regeling verschillen tussen gemeenten")
-        st.markdown(f"<p style='margin-bottom: 10px;'><em>De totale waarde (in € per maand) is een schatting o.b.v. alle regelingen waar de vier voorbeeldhuishoudens recht op hebben bij een inkomen van {selected_income_pct}% van het sociaal minimum</em></p>", unsafe_allow_html=True)
+        st.header("Waarde regelingen per huishouden")
 
         # Calculate values for all municipalities and all household types
         all_values = []
@@ -374,41 +401,55 @@ try:
                 font=dict(size=14, color='black')
             )
 
+        # Create multi-line x-axis labels with specific breaks
+        label_mapping = {
+            'Alleenstaande': 'Alleenstaande',
+            'Alleenstaande ouder met kind': 'Alleenstaande<br>ouder met kind',
+            'Paar': 'Paar',
+            'Paar met twee kinderen': 'Paar met<br>twee kinderen'
+        }
+        x_labels = [label_mapping.get(label, label) for label in sorted(plot_df['Huishouden_Label'].unique())]
+
         fig.update_layout(
             xaxis_title="",
             yaxis_title="",
-            height=600,
+            height=450,
             showlegend=False,
             hovermode='closest',
-            margin=dict(t=20, b=40, l=60, r=40),
+            margin=dict(t=0, b=60, l=50, r=20, autoexpand=False),
             yaxis=dict(
                 tickprefix="€ ",
                 tickfont=dict(size=14)
             ),
             xaxis=dict(
-                tickfont=dict(size=14)
+                tickfont=dict(size=14),
+                tickangle=0,
+                tickmode='array',
+                tickvals=sorted(plot_df['Huishouden_Label'].unique()),
+                ticktext=x_labels
             )
         )
 
         fig = add_logo_to_figure(fig, logo_base64)
 
-        config = {'displayModeBar': True, 'displaylogo': False}
-        event = st.plotly_chart(fig, width='stretch', key="scatter_plot", on_select="rerun", config=config)
+#       event = st.plotly_chart(fig, width='stretch', key="scatter_plot", on_select="rerun")
+        st.plotly_chart(fig, width='stretch')
 
-        if event and 'selection' in event and event['selection'] and 'points' in event['selection']:
-            points = event['selection']['points']
-            if len(points) > 0:
-                clicked_code = points[0].get('customdata')
-                if clicked_code and clicked_code != selected_gemeente:
-                    st.session_state['selected_gemeente'] = clicked_code
-                    st.rerun()
+        st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen waar de vier voorbeeldhuishoudens recht op hebben bij een inkomen van {selected_income_pct}% van het sociaal minimum*")
+
+#        if event and 'selection' in event and event['selection'] and 'points' in event['selection']:
+#            points = event['selection']['points']
+#            if len(points) > 0:
+#                clicked_code = points[0].get('customdata')
+#               if clicked_code and clicked_code != selected_gemeente:
+#                    st.session_state['selected_gemeente'] = clicked_code
+#                    st.rerun()
 
     # ----------------------------------------------------------------------------
     # Graph 2: Income Progression
     # ----------------------------------------------------------------------------
     with tab2:
-        st.header("2. De afbouw van ondersteuning verschilt ook tussen gemeenten")
-        st.markdown(f"<p style='margin-bottom: 10px;'><em>Gecombineerde waarde gemeentelijke regelingen voor een {household_labels[selected_huishouden].lower()} bij verschillende inkomensniveaus (uitgedrukt als percentage van het sociaal minimum)</em></p>", unsafe_allow_html=True)
+        st.header("Waarde regelingen per inkomensgroep")
 
         selected_gemeente_name = gemeente_labels[selected_gemeente]
 
@@ -509,9 +550,9 @@ try:
         fig_income.update_layout(
             xaxis_title="Inkomen (% van sociaal minimum)",
             yaxis_title="",
-            height=600,
+            height=450,
             hovermode='closest',
-            margin=dict(t=20, b=40, l=60, r=40),
+            margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
             xaxis=dict(
                 tickmode='array',
                 tickvals=[100, 110, 120, 130, 140, 150],
@@ -529,6 +570,7 @@ try:
 
         st.plotly_chart(fig_income, width='stretch')
 
+        st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen voor een {household_labels[selected_huishouden].lower()} bij verschillende inkomensniveaus*")
     # ----------------------------------------------------------------------------
     # Graph 3: Formal vs Informal
     # ----------------------------------------------------------------------------
@@ -568,17 +610,7 @@ try:
         bar_data = pd.DataFrame(bar_data_values)
         bar_data = bar_data.sort_values('Formeel', ascending=False)
 
-        selected_muni_data = bar_data[bar_data['Gemeente'] == selected_gemeente]
-        if len(selected_muni_data) > 0:
-            formal_value = selected_muni_data.iloc[0]['Formeel']
-            total_value = selected_muni_data.iloc[0]['Totaal']
-            formal_share = (formal_value / total_value * 100) if total_value > 0 else 0
-            formal_share_text = f"{formal_share:.0f}%"
-        else:
-            formal_share_text = "N/A"
-
-        st.header(f"3. Voor een {household_labels[selected_huishouden].lower()} in {selected_gemeente_name} is {formal_share_text} van de gemeentelijke ondersteuning formeel")
-        st.markdown(f"<p style='margin-bottom: 10px;'><em>Waarde formele en informele gemeentelijke regelingen per maand voor een {household_labels[selected_huishouden].lower()} op {selected_income_pct}% van het sociaal minimum</em></p>", unsafe_allow_html=True)
+        st.header("Formele en informele waarden")
 
         colors_formal = ['#d63f44' if code == selected_gemeente else '#9f9f9f' for code in bar_data['Gemeente']]
         colors_informal = ['#E68C8F' if code == selected_gemeente else '#C5C5C5' for code in bar_data['Gemeente']]
@@ -614,15 +646,15 @@ try:
             barmode='stack',
             xaxis_title="",
             yaxis_title="",
-            height=600,
+            height=450,
             showlegend=True,
-            margin=dict(t=20, b=40, l=60, r=40),
+            margin=dict(t=0, b=100, l=50, r=20, autoexpand=False),
             legend=dict(
                 orientation="h",
-                yanchor="bottom",
-                y=1.02,
+                yanchor="top",
+                y=0.95,
                 xanchor="right",
-                x=1
+                x=0.99
             ),
             yaxis=dict(
                 tickprefix="€ ",
@@ -638,12 +670,13 @@ try:
 
         st.plotly_chart(fig_bar, width='stretch')
 
+        st.markdown(f"*Waarde formele en informele gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op {selected_income_pct}% van het sociaal minimum*")
+
     # ----------------------------------------------------------------------------
     # Graph 4: Population vs Income Threshold
     # ----------------------------------------------------------------------------
     with tab4:
-        st.header("4. Gemeenten met meer inwoners hebben hogere inkomensdrempels")
-        st.markdown(f"<p style='margin-bottom: 10px;'><em>Waarde gemeentelijke regelingen (in € per maand) voor iemand op 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen die de gemeente hanteert voor een {household_labels[selected_huishouden].lower()}</em></p>", unsafe_allow_html=True)
+        st.header("Waarde en gemiddelde inkomensgrens")
 
         threshold_data_values = []
 
@@ -758,10 +791,11 @@ try:
             ))
 
         fig_threshold.update_layout(
-            xaxis_title="Inkomensgrens",
+            xaxis_title="Inkomensgrens (% van sociaal minimum)",
             yaxis_title="",
-            height=600,
+            height=450,
             hovermode='closest',
+            margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
             xaxis=dict(
                 ticksuffix="%",
                 tickfont=dict(size=14)
@@ -774,183 +808,179 @@ try:
 
         fig_threshold = add_logo_to_figure(fig_threshold, logo_base64)
 
-        config_threshold = {'displayModeBar': True, 'displaylogo': False}
-        event_threshold = st.plotly_chart(fig_threshold, width='stretch', key="threshold_plot", on_select="rerun", config=config_threshold)
+        #event_threshold = st.plotly_chart(fig_threshold, width='stretch', key="threshold_plot", on_select="rerun")
+        st.plotly_chart(fig_threshold, width='stretch')
+        st.markdown(f"*Waarde gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen die de gemeente hanteert voor dit huishouden*")
 
-        if event_threshold and 'selection' in event_threshold and event_threshold['selection'] and 'points' in event_threshold['selection']:
-            points = event_threshold['selection']['points']
-            if len(points) > 0:
-                clicked_code = points[0].get('customdata')
-                if clicked_code and clicked_code != selected_gemeente:
-                    st.session_state['selected_gemeente'] = clicked_code
-                    st.rerun()
+#        if event_threshold and 'selection' in event_threshold and event_threshold['selection'] and 'points' in event_threshold['selection']:
+#            points = event_threshold['selection']['points']
+#            if len(points) > 0:
+#                clicked_code = points[0].get('customdata')
+#                if clicked_code and clicked_code != selected_gemeente:
+#                    st.session_state['selected_gemeente'] = clicked_code
+#                    st.rerun()
 
     # ----------------------------------------------------------------------------
-    # Regulations Table (shown below all tabs)
+    # Regulations Table (shown on the right side)
     # ----------------------------------------------------------------------------
+    with table_col:
+        # Add vertical spacing to align with graphs (account for tabs and header)
+        st.markdown("<div style='height: 95px;'></div>", unsafe_allow_html=True)
+        # Get values from session state (set by selectors in tabs)
+        selected_gemeente = st.session_state.get('selected_gemeente', 'GM0363')
+        selected_income_pct = st.session_state.get('selected_income_pct', 100)
+        selected_huishouden = st.session_state.get('selected_huishouden', 'HH04')
+        selected_referteperiode = st.session_state.get('selected_referteperiode', 0)
+        regelingen_filter = st.session_state.get('regelingen_filter', ["Formele regelingen", "Informele regelingen"])
+        selected_cav = 1 if "Korting gemeentepolis" in regelingen_filter else 0
+        has_formeel = "Formele regelingen" in regelingen_filter
+        has_informeel = "Informele regelingen" in regelingen_filter
+        if has_formeel and has_informeel:
+            selected_fr = "all"
+        elif has_formeel:
+            selected_fr = "Ja"
+        elif has_informeel:
+            selected_fr = "Nee"
+        else:
+            selected_fr = "all"
 
-    # Get values from session state (set by selectors in tabs)
-    selected_gemeente = st.session_state.get('selected_gemeente', 'GM0363')
-    selected_income_pct = st.session_state.get('selected_income_pct', 100)
-    selected_huishouden = st.session_state.get('selected_huishouden', 'HH04')
-    selected_referteperiode = st.session_state.get('selected_referteperiode', 0)
-    regelingen_filter = st.session_state.get('regelingen_filter', ["Formele regelingen", "Informele regelingen"])
-    selected_cav = 1 if "Korting gemeentepolis" in regelingen_filter else 0
-    has_formeel = "Formele regelingen" in regelingen_filter
-    has_informeel = "Informele regelingen" in regelingen_filter
-    if has_formeel and has_informeel:
-        selected_fr = "all"
-    elif has_formeel:
-        selected_fr = "Ja"
-    elif has_informeel:
-        selected_fr = "Nee"
-    else:
-        selected_fr = "all"
+        selected_income = selected_income_pct / 100
 
-    selected_income = selected_income_pct / 100
+#        st.header(f"Regelingen in {gemeente_labels[selected_gemeente]}")
+#        st.markdown(f"*Overzicht van alle regelingen voor een {household_labels[selected_huishouden].lower()}. Regelingen die voldoen aan de geselecteerde filters staan bovenaan (gesorteerd op waarde).*")
 
-    # Legend for all graphs
-    st.markdown(f"""
-    <div style="display: flex; gap: 30px; align-items: center; margin-bottom: 20px; justify-content: flex-end;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #EF553B;"></div>
-            <span>{gemeente_labels[selected_gemeente]}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #B0B0B0;"></div>
-            <span>Overige gemeenten</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        # Get ALL regulations for selected gemeente and huishouden (no other filters)
+        hh = selected_huishouden
+        wrd_column = f'WRD_{hh}'
+        ig_column = f'IG_{hh}'
+        ref_column = f'Referteperiode_{hh}'
 
-    st.markdown("---")
+        # Filter only by gemeente and household (WB=1)
+        all_regs_mask = (df['GMcode'] == selected_gemeente) & (df['WB'] == 1)
+        all_regs_df = df[all_regs_mask].copy()
 
-    st.header(f"Regelingen in {gemeente_labels[selected_gemeente]}")
-    st.markdown(f"*Overzicht van alle regelingen voor een {household_labels[selected_huishouden].lower()}. Regelingen die voldoen aan de geselecteerde filters staan bovenaan (gesorteerd op waarde).*")
-
-    # Get ALL regulations for selected gemeente and huishouden (no other filters)
-    hh = selected_huishouden
-    wrd_column = f'WRD_{hh}'
-    ig_column = f'IG_{hh}'
-    ref_column = f'Referteperiode_{hh}'
-
-    # Filter only by gemeente and household (WB=1)
-    all_regs_mask = (df['GMcode'] == selected_gemeente) & (df['WB'] == 1)
-    all_regs_df = df[all_regs_mask].copy()
-
-    # Get regulations that match ALL current selectors
-    regulations_list = filter_benefits(
-        df=df,
-        gmcode=selected_gemeente,
-        hh=selected_huishouden,
-        ink=selected_income,
-        referteperiode=selected_referteperiode,
-        cav=selected_cav,
-        fr=selected_fr,
-        result="list"
-    )
-
-    # Create set of regulation names that match all filters
-    matching_regs = {reg['name'] for reg in regulations_list}
-
-    # Build table data with all regulations
-    regelingen_data = []
-    for _, row in all_regs_df.iterrows():
-        reg_name = row['NM']
-        wrd_value = row[wrd_column]
-        ig_value = row[ig_column]
-
-        # Check if this regulation matches all selectors
-        matches_filters = reg_name in matching_regs
-
-        regelingen_data.append({
-            'Regeling': reg_name,
-            'Waarde': (wrd_value / 12) if pd.notna(wrd_value) else None,
-            'Inkomensgrens': ig_value if pd.notna(ig_value) else None,
-            'Matches': matches_filters
-        })
-
-    # Split into matching and non-matching
-    regs_matching = [r for r in regelingen_data if r['Matches']]
-    regs_not_matching = [r for r in regelingen_data if not r['Matches']]
-
-    # Sort matching by WRD value (descending), non-matching alphabetically
-    regs_matching.sort(key=lambda x: x['Waarde'] if x['Waarde'] is not None else 0, reverse=True)
-    regs_not_matching.sort(key=lambda x: x['Regeling'])
-
-    # Combine
-    regelingen_sorted = regs_matching + regs_not_matching
-
-    if regelingen_sorted:
-        display_df = pd.DataFrame(regelingen_sorted)
-
-        # Find the maximum width of the integer part for alignment
-        max_int_width = 0
-        for val in display_df['Waarde']:
-            if pd.notna(val) and val is not None:
-                formatted = format_dutch_currency(val, 2)
-                if ',' in formatted:
-                    int_part = formatted.split(',')[0]
-                    max_int_width = max(max_int_width, len(int_part))
-
-        # Format currency for Waarde column with alignment on comma
-        def pad_currency(x):
-            if pd.notna(x) and x is not None:
-                formatted = format_dutch_currency(x, 2)
-                if ',' in formatted:
-                    parts = formatted.split(',')
-                    # Pad the integer part to align on the comma
-                    padded = parts[0].rjust(max_int_width) + ',' + parts[1]
-                    return padded
-                return formatted.rjust(max_int_width + 3)  # +3 for ",XX"
-            return ""
-
-        # Format percentage for Inkomensgrens column
-        def format_percentage(x):
-            if pd.notna(x) and x is not None:
-                return f"{int(x * 100)}%"
-            return ""
-
-        display_df['Waarde'] = display_df['Waarde'].apply(pad_currency)
-        display_df['Inkomensgrens'] = display_df['Inkomensgrens'].apply(format_percentage)
-
-        # Style rows: gray out non-matching and make Waarde column monospace
-        def style_row(row):
-            if not row['Matches']:
-                return ['color: #CCCCCC'] * len(row)
-            return [''] * len(row)
-
-        def style_waarde_column(s):
-            return ['font-family: monospace'] * len(s)
-
-        num_rows = len(display_df)
-        table_height = min(38 + (num_rows * 35), 1400)
-
-        styled_df = display_df[['Regeling', 'Waarde', 'Inkomensgrens', 'Matches']].style.apply(style_row, axis=1)
-        styled_df = styled_df.apply(style_waarde_column, subset=['Waarde'])
-
-        st.dataframe(
-            styled_df,
-            width='stretch',
-            hide_index=True,
-            height=table_height,
-            column_config={
-                "Waarde": st.column_config.TextColumn(
-                    "Waarde",
-                    width="small"
-                ),
-                "Inkomensgrens": st.column_config.TextColumn(
-                    "Inkomensgrens",
-                    width="small"
-                ),
-                "Matches": None
-            }
+        # Get regulations that match ALL current selectors
+        regulations_list = filter_benefits(
+            df=df,
+            gmcode=selected_gemeente,
+            hh=selected_huishouden,
+            ink=selected_income,
+            referteperiode=selected_referteperiode,
+            cav=selected_cav,
+            fr=selected_fr,
+            result="list"
         )
-    else:
-        st.info(f"Geen regelingen gevonden voor {gemeente_labels[selected_gemeente]}")
+
+        # Create set of regulation names that match all filters
+        matching_regs = {reg['name'] for reg in regulations_list}
+
+        # Build table data with all regulations
+        regelingen_data = []
+        for _, row in all_regs_df.iterrows():
+            reg_name = row['N4']
+            wrd_value = row[wrd_column]
+            ig_value = row[ig_column]
+
+            # Check if this regulation matches all selectors
+            matches_filters = reg_name in matching_regs
+
+            regelingen_data.append({
+                'Regeling': reg_name,
+                'Waarde': (wrd_value / 12) if pd.notna(wrd_value) else None,
+                'Inkomensgrens': ig_value if pd.notna(ig_value) else None,
+                'Matches': matches_filters
+            })
+
+        # Split into matching and non-matching
+        regs_matching = [r for r in regelingen_data if r['Matches']]
+        regs_not_matching = [r for r in regelingen_data if not r['Matches']]
+
+        # Sort matching by WRD value (descending), non-matching alphabetically
+        regs_matching.sort(key=lambda x: x['Waarde'] if x['Waarde'] is not None else 0, reverse=True)
+        regs_not_matching.sort(key=lambda x: x['Regeling'])
+
+        # Combine
+        regelingen_sorted = regs_matching + regs_not_matching
+
+        if regelingen_sorted:
+            display_df = pd.DataFrame(regelingen_sorted)
+
+            # Find the maximum width of the integer part for alignment
+            max_int_width = 0
+            for val in display_df['Waarde']:
+                if pd.notna(val) and val is not None:
+                    formatted = format_dutch_currency(val, 2)
+                    if ',' in formatted:
+                        int_part = formatted.split(',')[0]
+                        max_int_width = max(max_int_width, len(int_part))
+
+            # Format currency for Waarde column with alignment on comma
+            def pad_currency(x):
+                if pd.notna(x) and x is not None:
+                    formatted = format_dutch_currency(x, 2)
+                    if ',' in formatted:
+                        parts = formatted.split(',')
+                        # Pad the integer part to align on the comma
+                        padded = parts[0].rjust(max_int_width) + ',' + parts[1]
+                        return padded
+                    return formatted.rjust(max_int_width + 3)  # +3 for ",XX"
+                return ""
+
+            # Format percentage for Inkomensgrens column
+            def format_percentage(x):
+                if pd.notna(x) and x is not None:
+                    return f"{int(x * 100)}%"
+                return ""
+
+            display_df['Waarde'] = display_df['Waarde'].apply(pad_currency)
+            display_df['Inkomensgrens'] = display_df['Inkomensgrens'].apply(format_percentage)
+
+            # Style rows: gray out non-matching and make Waarde column monospace
+            def style_row(row):
+                if not row['Matches']:
+                    return ['color: #CCCCCC'] * len(row)
+                return [''] * len(row)
+
+            def style_waarde_column(s):
+                return ['font-family: monospace'] * len(s)
+
+            num_rows = len(display_df)
+            table_height = 38 + (num_rows * 35)  # No max limit, let table fit completely
+
+            # Rename columns for display
+            display_df = display_df.rename(columns={
+                'Regeling': 'Regelingen',
+                'Inkomensgrens': 'Grens'
+            })
+
+            styled_df = display_df[['Regelingen', 'Waarde', 'Grens', 'Matches']].style.apply(style_row, axis=1)
+            styled_df = styled_df.apply(style_waarde_column, subset=['Waarde'])
+
+            st.dataframe(
+                styled_df,
+                hide_index=True,
+                height=table_height,
+                column_config={
+                    "Regelingen": st.column_config.TextColumn(
+                        "Regelingen",
+                        width="100"
+                    ),
+                    "Waarde": st.column_config.TextColumn(
+                        "Waarde",
+                        width=75
+                    ),
+                    "Grens": st.column_config.TextColumn(
+                        "Grens",
+                        width=50
+                    ),
+                    "Matches": None
+                }
+            )
+        else:
+            st.info(f"Geen regelingen gevonden voor {gemeente_labels[selected_gemeente]}")
 
 except FileNotFoundError:
-    st.error("Could not find Pythondata.xlsx. Please make sure the file exists in the project directory.")
+    st.error("Could not find the excel datafile. Please make sure the file exists in the project directory.")
 except Exception as e:
     st.error(f"An error occurred: {str(e)}")
     st.info("Please check your data file format and try again.")
