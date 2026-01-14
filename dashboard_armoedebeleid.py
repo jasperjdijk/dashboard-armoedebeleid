@@ -26,15 +26,15 @@ st.set_page_config(
 )
 
 # Custom CSS for layout
-st.markdown("""
-<style>
-    /* Increase sidebar width */
-    [data-testid="stSidebar"] {
-        min-width: 320px;
-        max-width: 320px;
-    }
-</style>
-""", unsafe_allow_html=True)
+#st.markdown("""
+#<style>
+#    /* Increase sidebar width */
+#    [data-testid="stSidebar"] {
+#        min-width: 320px;
+#        max-width: 320px;
+#    }
+#</style>
+#"", unsafe_allow_html=True)
 
 # ================================================================================
 # HELPER FUNCTIONS
