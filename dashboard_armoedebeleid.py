@@ -63,7 +63,7 @@ def add_logo_to_figure(fig, logo_base64):
 @st.cache_data
 def load_data():
     """Load all required data from Excel file and merge municipality information"""
-    excel_url = "dataoverzicht_dashboard_armoedebeleid.xlsx"
+    excel_url = st.secrets["excel_url"]
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
     return df
