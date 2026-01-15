@@ -32,8 +32,9 @@ st.set_page_config(
 # Custom CSS for layout
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] > div:first-child {
-        width: 340px;
+    [data-testid="stSidebar"] {
+        min-width: 340px;
+        max-width: 340px;
     }
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
@@ -201,7 +202,7 @@ try:
     # ----------------------------------------------------------------------------
     # Header and Gemeente Labels Preparation
     # ----------------------------------------------------------------------------
-    st.title("Dashboard gemeentelijke inkomensafhankelijke regelingen")
+    st.title("Dashboard armoedebeleid")
 
     # Prepare gemeente labels before tabs
     gemeenten_df = df[['GMcode', 'Gemeentenaam']].dropna().drop_duplicates().sort_values('Gemeentenaam')
