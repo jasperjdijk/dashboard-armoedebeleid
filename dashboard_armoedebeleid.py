@@ -32,8 +32,9 @@ st.set_page_config(
 # Custom CSS for layout
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] {
-        background-color: #f4ede3;
+    [data-testid="stSidebar"] > div:first-child {
+        width: 320px;
+        overflow: hidden;
     }
 </style>
 """, unsafe_allow_html=True)
