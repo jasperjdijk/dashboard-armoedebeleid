@@ -33,8 +33,8 @@ st.set_page_config(
 st.markdown("""
 <style>
     [data-testid="stSidebar"] {
-        min-width: 300px;
-        max-width: 300px;
+        min-width: 260px;
+        max-width: 260px;
     }
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
