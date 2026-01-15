@@ -40,7 +40,7 @@ st.markdown("""
         overflow: hidden !important;
     }
     .stMainBlockContainer {
-        padding-top: 2rem;
+        padding-top: 0;
     }
 </style>
 """, unsafe_allow_html=True)
