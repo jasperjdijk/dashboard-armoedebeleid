@@ -1,13 +1,17 @@
 """
-Dashboard for municipal income-dependent regulations in the Netherlands
+Dashboard gemeentelijke inkomensafhankelijke regelingen
 
-This dashboard visualizes:
-1. Box plot showing value distribution by household type across municipalities
-2. Income progression line chart showing how support decreases with income
-3. Stacked bar chart comparing formal vs informal regulation values
-4. Scatter plot showing relationship between population and income thresholds
+A Streamlit dashboard for visualizing municipal income-dependent benefits
+in Dutch municipalities. Allows comparison of benefit values across municipalities
+for different household types and income levels.
 
-Data source: Pythondata.xlsx with CBS 2025 municipality data
+Visualizations:
+1. Household comparison - Box plot showing benefit values by household type
+2. Income progression - Line chart showing how benefits decrease with income
+3. Formal vs Informal - Stacked bar chart comparing regulation types
+4. Value vs Threshold - Scatter plot relating benefit value to income thresholds
+
+Data source: dataoverzicht_dashboard_armoedebeleid.xlsx
 """
 
 import streamlit as st
@@ -20,21 +24,19 @@ import base64
 # ================================================================================
 st.set_page_config(
     page_title="Dashboard gemeentelijke inkomensafhankelijke regelingen",
-    page_icon="📊",
+    page_icon="Favicon-alt-2.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Custom CSS for layout
-#st.markdown("""
-#<style>
-#    /* Increase sidebar width */
-#    [data-testid="stSidebar"] {
-#        min-width: 320px;
-#        max-width: 320px;
-#    }
-#</style>
-#"", unsafe_allow_html=True)
+st.markdown("""
+<style>
+    [data-testid="stSidebar"] {
+        background-color: #f4ede3;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ================================================================================
 # HELPER FUNCTIONS
@@ -73,50 +75,51 @@ def add_logo_to_figure(fig, logo_base64):
 
 @st.cache_data
 def load_data():
-    """Load all required data from Excel file and merge municipality information"""
-#    excel_url = "dataoverzicht_dashboard_armoedebeleid.xlsx"
+    # Get Excel URL from Streamlit secrets (keeps data private)
     excel_url = st.secrets["excel_url"]
+
+    """Load all required data from Excel file and merge municipality information"""
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
     return df
 
-def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0,cav=0, result="sum", fr="all", mt="all", wb=1, bt=1):
+def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0, cav=0, result="sum", fr="all", mt="all", wb=1, bt=1):
     """
-    Filter benefits from Totaaloverzicht based on criteria
+    Filter and aggregate benefits from Totaaloverzicht based on criteria.
 
     Parameters:
     -----------
     df : DataFrame
-        The Totaaloverzicht dataframe
+        The Totaaloverzicht dataframe containing all regulation data
     gmcode : str
-        Municipality code (e.g., 'GM0363')
+        Municipality code (e.g., 'GM0363' for Amsterdam)
     hh : str
-        Household type ('HH01', 'HH02', 'HH03', or 'HH04')
+        Household type code: 'HH01' (single), 'HH02' (single parent),
+        'HH03' (couple), or 'HH04' (couple with children)
     ink : float
-        Income level (e.g., 1.0 for 100%, 1.5 for 150%)
-    fr : str or "all"
-        FR value ('Ja', 'Nee', or 'all' to skip this filter)
-    mt : int or "all"
-        MT value (0, 1, or 'all' to skip this filter)
-    wb : int
-        WB value (0 or 1)
-    bt : int
-        BT value (0 or 1)
-    cav : int
-        CAV value (0 or 1)
+        Income level as fraction of social minimum (1.0 = 100%, 1.5 = 150%)
     referteperiode : int
-        Referte periode: 0, 1, 2, 3, 4 of 5 jaar
-    sum_only : bool, optional
-        If True, return only the sum of all WRD values (default: True)
-    return_weighted_sum : bool, optional
-        If True, return sum of WRD × (IG - 1.0) for weighted average calculation (default: False)
+        Required years at low income (0-5)
+    cav : int
+        Include health insurance discount (CAV): 0 = no, 1 = yes
+    result : str
+        Return type: 'sum' for total value, 'ig' for weighted income threshold,
+        'list' for detailed regulation list
+    fr : str
+        Formal regulation filter: 'Ja', 'Nee', or 'all'
+    mt : str
+        Means test filter: 0, 1, or 'all'
+    wb : int
+        Include in calculation (WB): 0 or 1
+    bt : int
+        Standard benefit (BT): 0 or 1
 
     Returns:
     --------
-    list of dict or float
-        If return_weighted_sum=True: Float representing sum of WRD × (IG - 1.0) / 12
-        If sum_only=True: Float representing the sum of all WRD amounts / 12
-        If sum_only=False: List of dictionaries with 'name' and 'amount' keys for each matching benefit
+    float or list
+        If result='sum': Monthly total value (€)
+        If result='ig': Weighted sum for income threshold calculation
+        If result='list': List of dicts with 'name' and 'amount' keys
     """
     # Determine which columns to use based on household type
     ig_column = f'IG_{hh}'
@@ -168,7 +171,12 @@ def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0,cav=0, result="sum",
         })
 
     return results
-    
+
+def format_dutch_currency(value, decimals=2):
+    """Format number as Dutch currency (dot for thousands, comma for decimals)."""
+    formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f"€ {formatted}"
+
 # ================================================================================
 # MAIN APPLICATION
 # ================================================================================
@@ -179,11 +187,6 @@ try:
     # ----------------------------------------------------------------------------
     df = load_data()
     logo_base64 = get_logo_base64()
-
-    def format_dutch_currency(value, decimals=2):
-        """Format number with Dutch formatting: dot for thousands, comma for decimals"""
-        formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-        return f"€ {formatted}"
 
     # Household type mapping
     household_labels = {
@@ -196,7 +199,7 @@ try:
     # ----------------------------------------------------------------------------
     # Header and Gemeente Labels Preparation
     # ----------------------------------------------------------------------------
-#    st.title("Dashboard gemeentelijke inkomensafhankelijke regelingen")
+    st.title("Dashboard gemeentelijke inkomensafhankelijke regelingen")
 
     # Prepare gemeente labels before tabs
     gemeenten_df = df[['GMcode', 'Gemeentenaam']].dropna().drop_duplicates().sort_values('Gemeentenaam')
@@ -432,18 +435,9 @@ try:
 
         fig = add_logo_to_figure(fig, logo_base64)
 
-#       event = st.plotly_chart(fig, width='stretch', key="scatter_plot", on_select="rerun")
         st.plotly_chart(fig, width='stretch')
 
         st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen waar de vier voorbeeldhuishoudens recht op hebben bij een inkomen van {selected_income_pct}% van het sociaal minimum*")
-
-#        if event and 'selection' in event and event['selection'] and 'points' in event['selection']:
-#            points = event['selection']['points']
-#            if len(points) > 0:
-#                clicked_code = points[0].get('customdata')
-#               if clicked_code and clicked_code != selected_gemeente:
-#                    st.session_state['selected_gemeente'] = clicked_code
-#                    st.rerun()
 
     # ----------------------------------------------------------------------------
     # Graph 2: Income Progression
@@ -454,7 +448,13 @@ try:
         selected_gemeente_name = gemeente_labels[selected_gemeente]
 
         fig_income = go.Figure()
-        income_levels_to_show = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
+
+        # Calculate dynamic income levels based on selected income
+        # First column is always 100%, then z, z+10, z+20, z+30, z+40
+        # where z = max(selected_income_pct - 20, 110) + final digit of selected_income_pct
+        final_digit = selected_income_pct % 10
+        z = min(max(selected_income_pct - 20, 100 + final_digit),140 + final_digit)
+        income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
 
         for gemeente_code, gemeente_name in gemeente_labels.items():
             gemeente_values = []
@@ -547,6 +547,25 @@ try:
             showlegend=False
         ))
 
+        # Add label for the selected income level
+        # Find the value at the selected income level from the line data
+        selected_income_value = selected_all_df[selected_all_df['Inkomen'] == selected_income]['Waarde'].values
+        if len(selected_income_value) > 0:
+            fig_income.add_annotation(
+                x=selected_income_pct,
+                y=selected_income_value[0],
+                text=format_dutch_currency(selected_income_value[0], 0),
+                showarrow=False,
+                xanchor='center',
+                xshift=0,
+                yshift=15,
+                font=dict(size=14, color='black')
+            )
+
+        # Create tick values matching income_levels_to_show
+        tick_vals = [round(level * 100) for level in income_levels_to_show]
+        tick_text = [f'{val}%' for val in tick_vals]
+
         fig_income.update_layout(
             xaxis_title="Inkomen (% van sociaal minimum)",
             yaxis_title="",
@@ -555,10 +574,10 @@ try:
             margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
             xaxis=dict(
                 tickmode='array',
-                tickvals=[100, 110, 120, 130, 140, 150],
-                ticktext=['100%', '110%', '120%', '130%', '140%', '150%'],
+                tickvals=tick_vals,
+                ticktext=tick_text,
                 tickfont=dict(size=14),
-                range=[95, 155]
+                range=[tick_vals[0] - 5, tick_vals[-1] + 5]
             ),
             yaxis=dict(
                 tickprefix="€ ",
@@ -808,17 +827,8 @@ try:
 
         fig_threshold = add_logo_to_figure(fig_threshold, logo_base64)
 
-        #event_threshold = st.plotly_chart(fig_threshold, width='stretch', key="threshold_plot", on_select="rerun")
         st.plotly_chart(fig_threshold, width='stretch')
         st.markdown(f"*Waarde gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen die de gemeente hanteert voor dit huishouden*")
-
-#        if event_threshold and 'selection' in event_threshold and event_threshold['selection'] and 'points' in event_threshold['selection']:
-#            points = event_threshold['selection']['points']
-#            if len(points) > 0:
-#                clicked_code = points[0].get('customdata')
-#                if clicked_code and clicked_code != selected_gemeente:
-#                    st.session_state['selected_gemeente'] = clicked_code
-#                    st.rerun()
 
     # ----------------------------------------------------------------------------
     # Regulations Table (shown on the right side)
@@ -826,34 +836,10 @@ try:
     with table_col:
         # Add vertical spacing to align with graphs (account for tabs and header)
         st.markdown("<div style='height: 95px;'></div>", unsafe_allow_html=True)
-        # Get values from session state (set by selectors in tabs)
-        selected_gemeente = st.session_state.get('selected_gemeente', 'GM0363')
-        selected_income_pct = st.session_state.get('selected_income_pct', 100)
-        selected_huishouden = st.session_state.get('selected_huishouden', 'HH04')
-        selected_referteperiode = st.session_state.get('selected_referteperiode', 0)
-        regelingen_filter = st.session_state.get('regelingen_filter', ["Formele regelingen", "Informele regelingen"])
-        selected_cav = 1 if "Korting gemeentepolis" in regelingen_filter else 0
-        has_formeel = "Formele regelingen" in regelingen_filter
-        has_informeel = "Informele regelingen" in regelingen_filter
-        if has_formeel and has_informeel:
-            selected_fr = "all"
-        elif has_formeel:
-            selected_fr = "Ja"
-        elif has_informeel:
-            selected_fr = "Nee"
-        else:
-            selected_fr = "all"
 
-        selected_income = selected_income_pct / 100
-
-#        st.header(f"Regelingen in {gemeente_labels[selected_gemeente]}")
-#        st.markdown(f"*Overzicht van alle regelingen voor een {household_labels[selected_huishouden].lower()}. Regelingen die voldoen aan de geselecteerde filters staan bovenaan (gesorteerd op waarde).*")
-
-        # Get ALL regulations for selected gemeente and huishouden (no other filters)
-        hh = selected_huishouden
-        wrd_column = f'WRD_{hh}'
-        ig_column = f'IG_{hh}'
-        ref_column = f'Referteperiode_{hh}'
+        # Column names for selected household type
+        wrd_column = f'WRD_{selected_huishouden}'
+        ig_column = f'IG_{selected_huishouden}'
 
         # Filter only by gemeente and household (WB=1)
         all_regs_mask = (df['GMcode'] == selected_gemeente) & (df['WB'] == 1)
@@ -917,6 +903,8 @@ try:
             # Format currency for Waarde column with alignment on comma
             def pad_currency(x):
                 if pd.notna(x) and x is not None:
+                    if x == 0:
+                        return "Ontbreekt"
                     formatted = format_dutch_currency(x, 2)
                     if ',' in formatted:
                         parts = formatted.split(',')
@@ -924,7 +912,7 @@ try:
                         padded = parts[0].rjust(max_int_width) + ',' + parts[1]
                         return padded
                     return formatted.rjust(max_int_width + 3)  # +3 for ",XX"
-                return ""
+                return "Ontbreekt"
 
             # Format percentage for Inkomensgrens column
             def format_percentage(x):
@@ -980,7 +968,6 @@ try:
             st.info(f"Geen regelingen gevonden voor {gemeente_labels[selected_gemeente]}")
 
 except FileNotFoundError:
-    st.error("Could not find the excel datafile. Please make sure the file exists in the project directory.")
+    st.error("Databestand 'dataoverzicht_dashboard_armoedebeleid.xlsx' niet gevonden.")
 except Exception as e:
-    st.error(f"An error occurred: {str(e)}")
-    st.info("Please check your data file format and try again.")
+    st.error(f"Er is een fout opgetreden: {str(e)}")

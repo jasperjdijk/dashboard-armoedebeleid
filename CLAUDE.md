@@ -1,0 +1,83 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+A Streamlit dashboard for visualizing Dutch municipal income-dependent benefits (armoedebeleid). Compares benefit values across municipalities for different household types and income levels.
+
+## Commands
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the dashboard
+streamlit run dashboard_armoedebeleid.py
+```
+
+The app runs at `http://localhost:8501`
+
+## Architecture
+
+### Main File: `dashboard_armoedebeleid.py`
+
+Single-file Streamlit application with this structure:
+
+1. **Page Configuration** - Streamlit setup and custom CSS
+2. **Helper Functions** - Data loading, filtering, formatting utilities
+3. **Main Application** - UI components and visualizations wrapped in try/except
+
+### Key Functions
+
+- `filter_benefits()` - Core data filtering function. Takes municipality code, household type, income level, and various filters. Returns aggregated benefit values or detailed lists based on `result` parameter ('sum', 'ig', 'list').
+- `format_dutch_currency()` - Formats numbers with Dutch conventions (dot for thousands, comma for decimals)
+- `add_logo_to_figure()` - Adds watermark logo to Plotly figures
+
+### Data Model
+
+Data source: `dataoverzicht_dashboard_armoedebeleid.xlsx` (sheet: "Totaaloverzicht")
+
+Key columns per household type (HH01-HH04):
+- `WRD_{HH}` - Annual benefit value (divided by 12 for monthly display)
+- `IG_{HH}` - Income threshold as fraction (1.0 = 100% social minimum)
+- `Referteperiode_{HH}` - Required years at low income
+
+Filter columns:
+- `GMcode` - Municipality code (e.g., 'GM0363' for Amsterdam)
+- `FR` - Formal regulation ('Ja'/'Nee')
+- `CAV` - Health insurance discount flag
+- `WB`, `BT` - Inclusion flags
+
+### Household Types
+
+- `HH01` - Alleenstaande (Single person)
+- `HH02` - Alleenstaande ouder met kind (Single parent with child)
+- `HH03` - Paar (Couple)
+- `HH04` - Paar met twee kinderen (Couple with two children)
+
+### Visualizations (4 tabs)
+
+1. **Huishoudtypen** - Box plot comparing all household types across municipalities
+2. **Inkomensgroepen** - Line chart showing benefit decrease as income increases
+3. **(In)formeel** - Stacked bar chart: formal vs informal regulations
+4. **Waarden en Inkomensgrenzen** - Scatter plot: benefit value vs weighted income threshold (bubble size = population)
+
+### Layout
+
+- Two-column layout: graphs (2/3) + regulations table (1/3)
+- Sidebar contains all filters (income slider, municipality, household type, years at low income, regulation types)
+- Selected municipality highlighted in red (#d63f44), others in gray (#9f9f9f)
+
+### Session State
+
+Filter values stored in `st.session_state`:
+- `selected_income_pct` (100-200)
+- `selected_gemeente` (municipality code)
+- `selected_huishouden` (HH01-HH04)
+- `selected_referteperiode` (0-5)
+- `regelingen_filter` (list of regulation type strings)
+
+## Language
+
+UI text is in Dutch. Error messages and user-facing strings should remain in Dutch.
