@@ -75,10 +75,9 @@ def add_logo_to_figure(fig, logo_base64):
 
 @st.cache_data
 def load_data():
+    """Load all required data from Excel file and merge municipality information"""
     # Get Excel URL from Streamlit secrets (keeps data private)
     excel_url = st.secrets["excel_url"]
-
-    """Load all required data from Excel file and merge municipality information"""
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
     return df
