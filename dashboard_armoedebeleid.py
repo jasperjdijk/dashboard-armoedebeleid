@@ -33,8 +33,8 @@ st.set_page_config(
 st.markdown("""
 <style>
     [data-testid="stSidebar"] {
-        min-width: 340px;
-        max-width: 340px;
+        min-width: 300px;
+        max-width: 300px;
     }
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
@@ -261,8 +261,7 @@ try:
         )
         st.session_state['regelingen_filter'] = regelingen_filter
 
-        # Legend
-        st.markdown("---")
+        # Legend    
         st.markdown("**Legenda**")
         st.markdown(f"""
         <div style="display: flex; flex-direction: column; gap: 8px;">
