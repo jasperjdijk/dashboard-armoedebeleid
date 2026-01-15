@@ -39,6 +39,9 @@ st.markdown("""
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
     }
+    .stMainBlockContainer {
+        padding-top: 2rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
