@@ -33,8 +33,10 @@ st.set_page_config(
 st.markdown("""
 <style>
     [data-testid="stSidebar"] > div:first-child {
-        width: 320px;
-        overflow: hidden;
+        width: 340px;
+    }
+    [data-testid="stSidebarContent"] {
+        overflow: hidden !important;
     }
 </style>
 """, unsafe_allow_html=True)
