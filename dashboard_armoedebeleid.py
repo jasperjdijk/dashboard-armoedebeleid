@@ -86,8 +86,8 @@ def load_data():
     # Get Excel URL from Streamlit secrets (keeps data private)
     excel_url = st.secrets["excel_url"]
     key1 = st.secrets["key1"]
-    key2 = st.secrets["key1"]
-    key3 = st.secrets["key1"]    
+    key2 = st.secrets["key2"]
+    key3 = st.secrets["key3"]    
 
     #excel_url = "dataoverzicht_dashboard_armoedebeleid.xlsx"
 
