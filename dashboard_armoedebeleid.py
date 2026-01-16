@@ -85,10 +85,25 @@ def load_data():
     """Load all required data from Excel file and merge municipality information"""
     # Get Excel URL from Streamlit secrets (keeps data private)
     excel_url = st.secrets["excel_url"]
+    key1 = st.secrets["key1"]
+    key2 = st.secrets["key1"]
+    key3 = st.secrets["key1"]    
+
+    #excel_url = "dataoverzicht_dashboard_armoedebeleid.xlsx"
+
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
     # Filter out specific municipalities
-    excluded_municipalities = ['Barneveld']
+
+    if st.query_params.get("key") == key1:
+        return df #Highest autorisations, all municiplaties are shown
+    elif st.query_params.get("key") == key2:
+        excluded_municipalities = ['Delft'] #Excludes all private municipalities except Barneveld, key can be given to Barneveld
+    elif st.query_params.get("key") == key3:
+        excluded_municipalities = ['Barneveld'] #Excludes all private municipalities except Delft, key can be given to Delft
+    else:
+        excluded_municipalities = ['Barneveld', 'Delft'] #Excludes all private municiplaties
+    
     df = df[~df['Gemeentenaam'].isin(excluded_municipalities)]
     return df
 
