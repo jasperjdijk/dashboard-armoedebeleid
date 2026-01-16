@@ -448,7 +448,7 @@ try:
     # Graph 2: Income Progression
     # ----------------------------------------------------------------------------
     with tab2:
-        st.header("Waarde regelingen per inkomensgroep"), anchor=False
+        st.header("Waarde regelingen per inkomensgroep", anchor=False)
 
         selected_gemeente_name = gemeente_labels[selected_gemeente]
 
