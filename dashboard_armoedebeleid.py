@@ -93,18 +93,11 @@ def load_data():
 
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
-    # Filter out specific municipalities
 
-    if st.query_params.get("key") == key1:
-        return df #Highest autorisations, all municiplaties are shown
-    elif st.query_params.get("key") == key2:
-        excluded_municipalities = ['Delft'] #Excludes all private municipalities except Barneveld, key can be given to Barneveld
-    elif st.query_params.get("key") == key3:
-        excluded_municipalities = ['Barneveld'] #Excludes all private municipalities except Delft, key can be given to Delft
-    else:
-        excluded_municipalities = ['Barneveld', 'Delft'] #Excludes all private municiplaties
-    
+    # Filter out specific municipalities
+    excluded_municipalities = ['Barneveld', 'Delft']
     df = df[~df['Gemeentenaam'].isin(excluded_municipalities)]
+
     return df
 
 def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0, cav=0, result="sum", fr="all", mt="all", wb=1, bt=1):
