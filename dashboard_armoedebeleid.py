@@ -205,7 +205,7 @@ try:
     # ----------------------------------------------------------------------------
     # Header and Gemeente Labels Preparation
     # ----------------------------------------------------------------------------
-    st.title("Dashboard armoedebeleid")
+    st.title("Dashboard armoedebeleid", anchor=False, text_alignment="center")
 
     # Prepare gemeente labels before tabs
     gemeenten_df = df[['GMcode', 'Gemeentenaam']].dropna().drop_duplicates().sort_values('Gemeentenaam')
@@ -215,7 +215,7 @@ try:
     # Selectors (in sidebar)
     # ----------------------------------------------------------------------------
     with st.sidebar:
-        st.header("Filters")
+        st.header("Filters", anchor=False)
 
         selected_income_pct = st.slider(
             "Inkomen:",
@@ -308,7 +308,7 @@ try:
     # Graph 1: Box Plot - Value by Household Type
     # ----------------------------------------------------------------------------
     with tab1:
-        st.header("Waarde regelingen per huishouden")
+        st.header("Waarde regelingen per huishouden", anchor=False)
 
         # Calculate values for all municipalities and all household types
         all_values = []
@@ -448,7 +448,7 @@ try:
     # Graph 2: Income Progression
     # ----------------------------------------------------------------------------
     with tab2:
-        st.header("Waarde regelingen per inkomensgroep")
+        st.header("Waarde regelingen per inkomensgroep"), anchor=False
 
         selected_gemeente_name = gemeente_labels[selected_gemeente]
 
@@ -634,7 +634,7 @@ try:
         bar_data = pd.DataFrame(bar_data_values)
         bar_data = bar_data.sort_values('Formeel', ascending=False)
 
-        st.header("Formele en informele waarden")
+        st.header("Formele en informele waarden", anchor=False)
 
         colors_formal = ['#d63f44' if code == selected_gemeente else '#9f9f9f' for code in bar_data['Gemeente']]
         colors_informal = ['#E68C8F' if code == selected_gemeente else '#C5C5C5' for code in bar_data['Gemeente']]
@@ -700,7 +700,7 @@ try:
     # Graph 4: Population vs Income Threshold
     # ----------------------------------------------------------------------------
     with tab4:
-        st.header("Waarde en gemiddelde inkomensgrens")
+        st.header("Waarde en gemiddelde inkomensgrens", anchor=False)
 
         threshold_data_values = []
 
