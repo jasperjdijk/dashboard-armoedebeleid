@@ -87,6 +87,9 @@ def load_data():
     excel_url = st.secrets["excel_url"]
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
+    # Filter out specific municipalities
+    excluded_municipalities = ['Barneveld']
+    df = df[~df['Gemeentenaam'].isin(excluded_municipalities)]
     return df
 
 def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0, cav=0, result="sum", fr="all", mt="all", wb=1, bt=1):
