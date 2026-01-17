@@ -41,6 +41,7 @@ st.markdown("""
     }
     .stMainBlockContainer {
         padding-top: 0;
+        padding-right: 3rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -85,17 +86,15 @@ def load_data():
     """Load all required data from Excel file and merge municipality information"""
     # Get Excel URL from Streamlit secrets (keeps data private)
     excel_url = st.secrets["excel_url"]
-    key1 = st.secrets["key1"]
-    key2 = st.secrets["key2"]
-    key3 = st.secrets["key3"]    
-
-    #excel_url = "dataoverzicht_dashboard_armoedebeleid.xlsx"
 
     excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
 
     # Filter out specific municipalities
-    excluded_municipalities = ['Barneveld', 'Delft']
+    excluded_municipalities = []
+    #excluded_municipalities.append('Barneveld')
+    excluded_municipalities.append('Delft')
+
     df = df[~df['Gemeentenaam'].isin(excluded_municipalities)]
 
     return df
@@ -183,6 +182,7 @@ def filter_benefits(df, gmcode, hh, ink=1, referteperiode=0, cav=0, result="sum"
     results = []
     for _, row in filtered.iterrows():
         results.append({
+            'id': row['ID'],
             'name': row['N4'],
             'amount': row[wrd_column] / 12
         })
@@ -873,18 +873,19 @@ try:
             result="list"
         )
 
-        # Create set of regulation names that match all filters
-        matching_regs = {reg['name'] for reg in regulations_list}
+        # Create set of regulation IDs that match all filters
+        matching_reg_ids = {reg['id'] for reg in regulations_list}
 
         # Build table data with all regulations
         regelingen_data = []
         for _, row in all_regs_df.iterrows():
+            reg_id = row['ID']
             reg_name = row['N4']
             wrd_value = row[wrd_column]
             ig_value = row[ig_column]
 
             # Check if this regulation matches all selectors
-            matches_filters = reg_name in matching_regs
+            matches_filters = reg_id in matching_reg_ids
 
             regelingen_data.append({
                 'Regeling': reg_name,
@@ -896,6 +897,29 @@ try:
         # Split into matching and non-matching
         regs_matching = [r for r in regelingen_data if r['Matches']]
         regs_not_matching = [r for r in regelingen_data if not r['Matches']]
+
+        # Combine rows with the same name and same matching status
+        def combine_rows(rows):
+            combined = {}
+            for r in rows:
+                name = r['Regeling']
+                if name in combined:
+                    # Sum the values
+                    if combined[name]['Waarde'] is not None and r['Waarde'] is not None:
+                        combined[name]['Waarde'] += r['Waarde']
+                    elif r['Waarde'] is not None:
+                        combined[name]['Waarde'] = r['Waarde']
+                    # Use lower bound for income threshold
+                    if combined[name]['Inkomensgrens'] is not None and r['Inkomensgrens'] is not None:
+                        combined[name]['Inkomensgrens'] = min(combined[name]['Inkomensgrens'], r['Inkomensgrens'])
+                    elif r['Inkomensgrens'] is not None:
+                        combined[name]['Inkomensgrens'] = r['Inkomensgrens']
+                else:
+                    combined[name] = r.copy()
+            return list(combined.values())
+
+        regs_matching = combine_rows(regs_matching)
+        regs_not_matching = combine_rows(regs_not_matching)
 
         # Sort matching by WRD value (descending), non-matching alphabetically
         regs_matching.sort(key=lambda x: x['Waarde'] if x['Waarde'] is not None else 0, reverse=True)
@@ -964,10 +988,11 @@ try:
                 styled_df,
                 hide_index=True,
                 height=table_height,
+                use_container_width=True,
                 column_config={
                     "Regelingen": st.column_config.TextColumn(
                         "Regelingen",
-                        width="100"
+                        width=200
                     ),
                     "Waarde": st.column_config.TextColumn(
                         "Waarde",
