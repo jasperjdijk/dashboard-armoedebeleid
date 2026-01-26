@@ -62,7 +62,7 @@ def load_data(key):
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
 
     if key == st.secrets["key_all"]:
-        return df
+        return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '')]
     elif key == st.secrets["key_delft"]:
         excluded_municipalities = ['Barneveld']
     elif key == st.secrets["key_barneveld"]:
@@ -70,10 +70,66 @@ def load_data(key):
     else:
         excluded_municipalities = ['Barneveld', 'Delft']
 
-    df = df[~df['Gemeentenaam'].isin(excluded_municipalities)]
-    return df
+    return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '') & ~df['Gemeentenaam'].isin(excluded_municipalities)]
 
-def filter_benefits(df, gmcode, hh, ink=1, refper=0, cav=0, result="sum", fr="all", mt="all", wb=1, bt=1):
+
+@st.cache_data
+def get_alle_gemeenten(_df):
+    """Get all unique municipality codes from the dataframe (cached)."""
+    return _df['GMcode'].unique()
+
+
+def apply_filters(hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
+    """
+    Apply standard filters to the dataframe and return a boolean mask.
+
+    Parameters:
+    -----------
+    df : DataFrame
+        The Totaaloverzicht dataframe
+    hh : str
+        Household type code ('HH01', 'HH02', 'HH03', 'HH04')
+    ink : float
+        Income level as fraction of social minimum (1.0 = 100%)
+    refper : int
+        Required years at low income (0-5)
+    cav : int
+        Include health insurance discount: 0 = no, 1 = yes
+    fr : int
+        Formal regulation filter: 1 = formal, 2 = informal, 3 = both
+    gmcode : str, optional
+        Municipality code. If None, applies to all municipalities.
+
+    Returns:
+    --------
+    pd.Series
+        Boolean mask for filtering the dataframe
+    """
+    ig_col, ref_col = f'IG_{hh}', f'Referteperiode_{hh}'
+
+    mask = (df['WB'] == 1) & (df[ig_col] >= ink) & (df[ref_col] <= refper)
+
+    if gmcode is not None:
+        mask &= (df['GMcode'] == gmcode)
+
+    if cav == 1:
+        mask &= ((df['BT'] == 1) | (df['CAV'] == 1))
+    else:
+        mask &= (df['BT'] == 1) & (df['CAV'] == 0)
+
+    if fr == 1:
+        mask &= (df['FR'] == 'Ja')
+    elif fr == 2:
+        mask &= (df['FR'] == 'Nee')
+
+    return mask
+
+
+def filter_regelingen2(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
+    return df[apply_filters(hh, ink, refper, cav, fr, gmcode)]
+    
+
+def filter_regelingen(df, gmcode, hh, ink=1, refper=0, cav=0, fr=3, result="sum"):
     """
     Filter and aggregate benefits from Totaaloverzicht based on criteria.
 
@@ -96,14 +152,7 @@ def filter_benefits(df, gmcode, hh, ink=1, refper=0, cav=0, result="sum", fr="al
         Return type: 'sum' for total value, 'ig' for weighted income threshold,
         'list' for detailed regulation list
     fr : str
-        Formal regulation filter: 'Ja', 'Nee', or 'all'
-    mt : str
-        Means test filter: 0, 1, or 'all'
-    wb : int
-        Include in calculation (WB): 0 or 1
-    bt : int
-        Standard benefit (BT): 0 or 1
-
+        Formal regulation filter: 1 = formele regelingen, 2 = informele regelingen, 3 = beide
     Returns:
     --------
     float or list
@@ -111,90 +160,70 @@ def filter_benefits(df, gmcode, hh, ink=1, refper=0, cav=0, result="sum", fr="al
         If result='ig': Weighted sum for income threshold calculation
         If result='list': List of dicts with 'name' and 'amount' keys
     """
-    # Determine which columns to use based on household type
-    ig_column = f'IG_{hh}'
-    wrd_column = f'WRD_{hh}'
-    ref_column = f'Referteperiode_{hh}'
+    wrd_col, ig_col = f'WRD_{hh}', f'IG_{hh}'
 
-    # Start with base conditions
-    mask = (df['GMcode'] == gmcode) & (df['WB'] == wb)
+    filtered = df[apply_filters(hh, ink, refper, cav, fr, gmcode)].copy()
 
-    if cav == 1:
-        mask &= ((df['BT'] == bt) | (df['CAV'] == cav))
-    else:
-        # All other cases: exact match
-        mask &= (df['BT'] == bt) & (df['CAV'] == cav)
-
-    # Add FR filter only if not "all"
-    if fr != "all":
-        mask &= (df['FR'] == fr)
-
-    # Add MT filter only if not "all"
-    if mt != "all":
-        mask &= (df['MT'] == mt)
-
-    # Add income threshold filter: INK must be <= IG_HH (income must be at or below the threshold)
-    # Convert to numeric, coercing errors to NaN
-    ig_numeric = pd.to_numeric(df[ig_column], errors='coerce')
-    mask &= ig_numeric.notna() & (ig_numeric >= ink)
-
-    ref_numeric = pd.to_numeric(df[ref_column], errors='coerce')
-    mask &= ref_numeric.notna() & (ref_numeric <= refper)
-
-    filtered = df[mask].copy()
-
-    if result=="ig":
-        # Calculate weighted sum for average threshold calculation
-        # Sum of WRD × (IG - 1.0) for each regulation
-        # Calculate contribution: WRD × (IG - 1.0)
-        filtered['contribution'] = filtered[wrd_column] * (filtered[ig_column] - 1.0)
+    if result == "ig":
+        filtered['contribution'] = filtered[wrd_col] * (filtered[ig_col] - 1.0)
         return filtered['contribution'].sum() / 12
 
-    if result=="sum":
-        return filtered[wrd_column].sum() / 12
+    if result == "sum":
+        return filtered[wrd_col].sum() / 12
 
-    results = []
-    for _, row in filtered.iterrows():
-        results.append({
-            'id': row['ID'],
-            'name': row['N4'],
-            'amount': row[wrd_column] / 12
-        })
-
-    return results
+    # result=="list": return set of matching regulation IDs
+    return set(filtered['ID'])
 
 def format_dutch_currency(value, decimals=0):
     """Format number as Dutch currency (dot for thousands, comma for decimals)."""
     formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"€ {formatted}"
 
+
 # ================================================================================
-# CACHED DATA FUNCTIONS FOR GRAPHS
+# CACHED DATA FUNCTIONS FOR GRAPHS AND TABLE
 # ================================================================================
+@st.cache_data
+def regelingen_lijst(_df, gmcode, hh, ink, refper, cav, fr, key=None):
+    """Get table data for all regulations, with matching status. Sorted: matching by value, non-matching alphabetically."""
+    wrd_col, ig_col = f'WRD_{hh}', f'IG_{hh}'
+    regs = _df[_df['GMcode'] == gmcode]
+    df = filter_regelingen2(_df, hh, ink, refper, cav, fr, gmcode)
+    matching_ids = df['ID']
+
+    grouped = regs.assign(
+        Regeling=regs['N4'],
+        Waarde=regs[wrd_col] / 12,
+        Inkomensgrens=regs[ig_col],
+        Matches=regs['ID'].isin(matching_ids)
+    ).groupby(['Regeling', 'Matches'], as_index=False).agg(
+        Waarde=('Waarde', 'sum'),
+        Inkomensgrens=('Inkomensgrens', 'min')
+    )
+
+    return pd.concat([
+        grouped[grouped['Matches']].sort_values('Waarde', ascending=False),
+        grouped[~grouped['Matches']].sort_values('Regeling')
+    ])
+
 
 @st.cache_data
-def get_household_data(_df, selected_income, selected_referteperiode, selected_cav, selected_fr, key=None):
+def get_household_data(_df, ink, refper, cav, fr, key=None):
     """Calculate values for all municipalities and all household types (Graph 1)."""
-    gemeente_codes = _df['GMcode'].dropna().unique()
-    household_codes = ['HH01', 'HH02', 'HH03', 'HH04']
-    all_values = []
-    for gmcode in gemeente_codes:
-        for hh_code in household_codes:
-            total_value = filter_benefits(
-                df=_df,
-                gmcode=gmcode,
-                hh=hh_code,
-                ink=selected_income,
-                refper=selected_referteperiode,
-                cav=selected_cav,
-                fr=selected_fr
-            )
-            all_values.append({
-                'Gemeente': gmcode,
-                'Huishouden': hh_code,
-                'Waarde': total_value
-            })
-    return pd.DataFrame(all_values)
+    alle_gemeenten = get_alle_gemeenten(_df)
+    results = []
+
+    for hh in ['HH01', 'HH02', 'HH03', 'HH04']:
+        wrd_col = f'WRD_{hh}'
+        df = filter_regelingen2(_df, hh, ink, refper, cav, fr)
+        hh_data = (df.groupby('GMcode')[wrd_col].sum() / 12)
+        hh_data = hh_data.reindex(alle_gemeenten, fill_value=0)
+        hh_data = hh_data.reset_index()
+        hh_data.columns = ['Gemeente', 'Waarde']
+        hh_data['Huishouden'] = hh
+        results.append(hh_data)
+
+    return pd.concat(results, ignore_index=True)
 
 @st.cache_data
 def get_income_progression_data(_df, selected_huishouden, selected_income_pct, selected_referteperiode, selected_cav, selected_fr, key=None):
@@ -204,11 +233,11 @@ def get_income_progression_data(_df, selected_huishouden, selected_income_pct, s
     z = min(max(selected_income_pct - 20, 100 + final_digit), 140 + final_digit)
     income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
 
-    gemeente_codes = _df['GMcode'].dropna().unique()
+    gemeente_codes = get_alle_gemeenten(_df)
     all_values = []
     for gmcode in gemeente_codes:
         for income_level in income_levels_to_show:
-            total_value = filter_benefits(
+            total_value = filter_regelingen(
                 df=_df,
                 gmcode=gmcode,
                 hh=selected_huishouden,
@@ -230,7 +259,7 @@ def get_income_line_data(_df, selected_gemeente, selected_huishouden, selected_r
     all_income_levels = [i/100 for i in range(100, 201, 1)]
     selected_all_data = []
     for income_level in all_income_levels:
-        total_value = filter_benefits(
+        total_value = filter_regelingen(
             df=_df,
             gmcode=selected_gemeente,
             hh=selected_huishouden,
@@ -248,24 +277,24 @@ def get_income_line_data(_df, selected_gemeente, selected_huishouden, selected_r
 @st.cache_data
 def get_formal_informal_data(_df, selected_huishouden, selected_income, selected_referteperiode, selected_cav, key=None):
     """Calculate formal and informal values for all municipalities (Graph 3)."""
-    gemeente_codes = _df['GMcode'].dropna().unique()
+    gemeente_codes = get_alle_gemeenten(_df)
     bar_data_values = []
     for gmcode in gemeente_codes:
-        formal_value = filter_benefits(
+        formal_value = filter_regelingen(
             df=_df,
             gmcode=gmcode,
             hh=selected_huishouden,
             ink=selected_income,
-            fr='Ja',
+            fr=1,
             refper=selected_referteperiode,
             cav=selected_cav
         )
-        informal_value = filter_benefits(
+        informal_value = filter_regelingen(
             df=_df,
             gmcode=gmcode,
             hh=selected_huishouden,
             ink=selected_income,
-            fr='Nee',
+            fr=2,
             refper=selected_referteperiode,
             cav=selected_cav
         )
@@ -280,14 +309,14 @@ def get_formal_informal_data(_df, selected_huishouden, selected_income, selected
 @st.cache_data
 def get_threshold_data(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, key=None):
     """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
-    gemeente_codes = _df['GMcode'].dropna().unique()
+    gemeente_codes = get_alle_gemeenten(_df)
     threshold_data_values = []
     for gmcode in gemeente_codes:
         gemeente_regs = _df[_df['GMcode'] == gmcode]
         if len(gemeente_regs) == 0:
             continue
 
-        wrd_at_100 = filter_benefits(
+        wrd_at_100 = filter_regelingen(
             df=_df,
             gmcode=gmcode,
             hh=selected_huishouden,
@@ -297,7 +326,7 @@ def get_threshold_data(_df, selected_huishouden, selected_referteperiode, select
             fr=selected_fr
         )
 
-        weighted_sum = filter_benefits(
+        weighted_sum = filter_regelingen(
             df=_df,
             gmcode=gmcode,
             hh=selected_huishouden,
@@ -801,7 +830,6 @@ try:
     default_gemeente = params.get("gm", "GM0363")
     default_huishouden = params.get("hh", "HH04")
     default_refper = int(params.get("ref", 0))
-    default_regelingen = params.get("reg", "").split(",") if params.get("reg") else []
 
     with st.sidebar:
         st.header("Filters", anchor=False)
@@ -850,49 +878,43 @@ try:
         )
 
         # Regulation type selector (multi-select)
-        has_reg_param = params.get("reg") is not None
+        # URL format: reg=1 (Formeel), reg=2 (Informeel), reg=3 (both)
+        default_fr = int(params.get("reg", 3))
 
-        # Determine default value for regulation type selector
-        if has_reg_param:
-            default_reg_types = []
-            if "f" in default_regelingen:
-                default_reg_types.append("Formeel")
-            if "i" in default_regelingen:
-                default_reg_types.append("Informeel")
-            # Ensure at least one is selected
-            if not default_reg_types:
-                default_reg_types = ["Formeel", "Informeel"]
+        # Convert fr value to default_reg_types list
+        if default_fr == 1:
+            default_reg_types = ["Formeel"]
+        elif default_fr == 2:
+            default_reg_types = ["Informeel"]
         else:
             default_reg_types = ["Formeel", "Informeel"]
 
-        # Handle auto-toggle logic: if session state exists and is empty, determine which option to auto-select
+        # Handle auto-toggle logic: if session state exists and is empty, toggle to the other option
         if "reg_types" in st.session_state:
             current_value = st.session_state.reg_types
             if not current_value or len(current_value) == 0:
-                # Get previous value from query params to determine what was selected before
-                if "f" in default_regelingen and "i" not in default_regelingen:
-                    # Had only Formeel, switch to Informeel
+                # Toggle based on previous value
+                if default_fr == 1:
                     st.session_state.reg_types = ["Informeel"]
-                    st.rerun()
-                elif "i" in default_regelingen and "f" not in default_regelingen:
-                    # Had only Informeel, switch to Formeel
+                elif default_fr == 2:
                     st.session_state.reg_types = ["Formeel"]
-                    st.rerun()
                 else:
-                    # Default to Formeel
                     st.session_state.reg_types = ["Formeel"]
-                    st.rerun()
+                st.rerun()
 
+        # Regulation type values: Formeel=1, Informeel=2, both=3
+        reg_type_values = {"Formeel": 1, "Informeel": 2}
         selected_reg_types = st.segmented_control(
             "Type regelingen",
-            options=["Formeel", "Informeel"],
+            options=list(reg_type_values.keys()),
             default=default_reg_types,
             selection_mode="multi",
             key="reg_types",
             help="Selecteer welke regelingen worden meegenomen: formele, informele of beide"
         )
 
-        toggle_cav = st.toggle("Korting gemeentepolis", value="k" in default_regelingen if has_reg_param else False, key="toggle_cav")
+        default_cav = params.get("cav", "0") == "1"
+        toggle_cav = st.toggle("Korting gemeentepolis", value=default_cav, key="toggle_cav")
 
         # Legend
         st.markdown("**Legenda**")
@@ -915,28 +937,12 @@ try:
     new_params["gm"] = selected_gemeente
     new_params["hh"] = selected_huishouden
     new_params["ref"] = str(selected_referteperiode)
-    # Build reg parameter from regulation type selector
-    reg_codes = []
-    if "Formeel" in selected_reg_types:
-        reg_codes.append("f")
-    if "Informeel" in selected_reg_types:
-        reg_codes.append("i")
-    if toggle_cav:
-        reg_codes.append("k")
-    if reg_codes:
-        new_params["reg"] = ",".join(reg_codes)
-    st.query_params.update(new_params)
-
-    # Calculate CAV/FR parameters
+    # Calculate selected_fr and CAV for URL
+    selected_fr = sum(reg_type_values.get(rt, 0) for rt in selected_reg_types) or 3
     selected_cav = 1 if toggle_cav else 0
-    if "Formeel" in selected_reg_types and "Informeel" in selected_reg_types:
-        selected_fr = "all"
-    elif "Formeel" in selected_reg_types:
-        selected_fr = "Ja"
-    elif "Informeel" in selected_reg_types:
-        selected_fr = "Nee"
-    else:
-        selected_fr = "all"
+    new_params["reg"] = str(selected_fr)
+    new_params["cav"] = str(selected_cav)
+    st.query_params.update(new_params)
 
     # Create two-column layout: graphs on left, table on right
     graph_col, table_col = st.columns([2, 1])
@@ -1045,88 +1051,18 @@ try:
     # ----------------------------------------------------------------------------
     with table_col:
         # Add vertical spacing to align with graphs (account for tabs and header)
-        st.markdown("<div style='height: 95px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 65px;'></div>", unsafe_allow_html=True)
+        st.markdown(f"*Waarde (in € per maand) en inkomensgrens<br />voor alle regelingen in {gemeente_labels[selected_gemeente]}*", unsafe_allow_html=True)
 
-        # Column names for selected household type
-        wrd_column = f'WRD_{selected_huishouden}'
-        ig_column = f'IG_{selected_huishouden}'
-
-        # Filter only by gemeente and household (WB=1)
-        all_regs_mask = (df['GMcode'] == selected_gemeente) & (df['WB'] == 1)
-        all_regs_df = df[all_regs_mask].copy()
-
-        # Get regulations that match ALL current selectors
-        regulations_list = filter_benefits(
-            df=df,
-            gmcode=selected_gemeente,
-            hh=selected_huishouden,
-            ink=selected_income,
-            refper=selected_referteperiode,
-            cav=selected_cav,
-            fr=selected_fr,
-            result="list"
+        # Get table data with all regulations (matching and non-matching)
+        display_df = regelingen_lijst(
+            df, selected_gemeente, selected_huishouden,
+            selected_income, selected_referteperiode, selected_cav, selected_fr
         )
 
-        # Create set of regulation IDs that match all filters
-        matching_reg_ids = {reg['id'] for reg in regulations_list}
-
-        # Build table data with all regulations
-        regelingen_data = []
-        for _, row in all_regs_df.iterrows():
-            reg_id = row['ID']
-            reg_name = row['N4']
-            wrd_value = row[wrd_column]
-            ig_value = row[ig_column]
-
-            # Check if this regulation matches all selectors
-            matches_filters = reg_id in matching_reg_ids
-
-            regelingen_data.append({
-                'Regeling': reg_name,
-                'Waarde': (wrd_value / 12) if pd.notna(wrd_value) else None,
-                'Inkomensgrens': ig_value if pd.notna(ig_value) else None,
-                'Matches': matches_filters
-            })
-
-        # Split into matching and non-matching
-        regs_matching = [r for r in regelingen_data if r['Matches']]
-        regs_not_matching = [r for r in regelingen_data if not r['Matches']]
-
-        # Combine rows with the same name and same matching status
-        def combine_rows(rows):
-            combined = {}
-            for r in rows:
-                name = r['Regeling']
-                if name in combined:
-                    # Sum the values
-                    if combined[name]['Waarde'] is not None and r['Waarde'] is not None:
-                        combined[name]['Waarde'] += r['Waarde']
-                    elif r['Waarde'] is not None:
-                        combined[name]['Waarde'] = r['Waarde']
-                    # Use lower bound for income threshold
-                    if combined[name]['Inkomensgrens'] is not None and r['Inkomensgrens'] is not None:
-                        combined[name]['Inkomensgrens'] = min(combined[name]['Inkomensgrens'], r['Inkomensgrens'])
-                    elif r['Inkomensgrens'] is not None:
-                        combined[name]['Inkomensgrens'] = r['Inkomensgrens']
-                else:
-                    combined[name] = r.copy()
-            return list(combined.values())
-
-        regs_matching = combine_rows(regs_matching)
-        regs_not_matching = combine_rows(regs_not_matching)
-
-        # Sort matching by WRD value (descending), non-matching alphabetically
-        regs_matching.sort(key=lambda x: x['Waarde'] if x['Waarde'] is not None else 0, reverse=True)
-        regs_not_matching.sort(key=lambda x: x['Regeling'])
-
-        # Combine
-        regelingen_sorted = regs_matching + regs_not_matching
-
-        if regelingen_sorted:
-            display_df = pd.DataFrame(regelingen_sorted)
-
+        if not display_df.empty:
             # Find the maximum value to determine padding width
-            max_value = max((r['Waarde'] for r in regelingen_sorted if r['Waarde'] is not None and r['Waarde'] > 0), default=0)
+            max_value = display_df['Waarde'].max() or 0
             # Calculate width needed for the largest number (without € sign)
             if max_value > 0:
                 max_formatted = f"{max_value:,.0f}".replace(',', '.')
