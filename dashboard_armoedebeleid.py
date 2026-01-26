@@ -41,10 +41,6 @@ st.markdown("""
         padding-top: 0;
         padding-right: 3rem;
     }
-    /* Right-align the Waarde column (2nd column) in the regulations table */
-    [data-testid="stDataFrame"] td:nth-child(2) {
-        text-align: right !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -334,6 +330,436 @@ def get_threshold_data(_df, selected_huishouden, selected_referteperiode, select
     return pd.DataFrame(threshold_data_values)
 
 # ================================================================================
+# CACHED FIGURE FUNCTIONS
+# ================================================================================
+
+@st.cache_data
+def create_household_figure(_df, selected_income, selected_income_pct, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
+    """Create box plot figure for household comparison (Graph 1)."""
+    # Get data
+    plot_df = get_household_data(_df, selected_income, selected_referteperiode, selected_cav, selected_fr, key=key)
+    plot_df['Gemeentenaam'] = plot_df['Gemeente'].map(gemeente_labels)
+    plot_df['Huishouden_Label'] = plot_df['Huishouden'].map(household_labels)
+
+    fig = go.Figure()
+    for household in sorted(plot_df['Huishouden_Label'].unique()):
+        household_data = plot_df[plot_df['Huishouden_Label'] == household]
+
+        selected_data = household_data[household_data['Gemeente'] == selected_gemeente]
+        other_data = household_data[household_data['Gemeente'] != selected_gemeente]
+
+        if len(other_data) > 0:
+            # Vectorized hover text
+            hover_text_other = (
+                "<b>" + other_data['Gemeentenaam'].astype(str) + "</b><br>" +
+                f"{selected_income_pct}% sociaal minimum<br>Waarde: € " +
+                other_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+            )
+
+            fig.add_trace(go.Box(
+                x=[household] * len(other_data),
+                y=other_data['Waarde'],
+                name=household,
+                boxpoints='all',
+                jitter=0.3,
+                pointpos=0,
+                marker=dict(
+                    size=8,
+                    color='#9f9f9f',
+                    opacity=0.6
+                ),
+                hovertext=hover_text_other,
+                hoverinfo='text',
+                customdata=other_data['Gemeente'].values,
+                showlegend=False,
+                fillcolor='rgba(255,255,255,0)',
+                line=dict(color='rgba(255,255,255,0)')
+            ))
+
+        if len(selected_data) > 0:
+            # Vectorized hover text
+            hover_text_selected = (
+                "<b>" + selected_data['Gemeentenaam'].astype(str) + "</b><br>" +
+                f"{selected_income_pct}% sociaal minimum<br>Waarde: € " +
+                selected_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+            )
+
+            fig.add_trace(go.Box(
+                x=[household] * len(selected_data),
+                y=selected_data['Waarde'],
+                name=household,
+                boxpoints='all',
+                jitter=0.3,
+                pointpos=0,
+                marker=dict(
+                    size=10,
+                    color='#d63f44',
+                ),
+                hovertext=hover_text_selected,
+                hoverinfo='text',
+                customdata=selected_data['Gemeente'].values,
+                showlegend=False,
+                fillcolor='rgba(255,255,255,0)',
+                line=dict(color='rgba(255,255,255,0)')
+            ))
+
+    selected_municipality_data = plot_df[plot_df['Gemeente'] == selected_gemeente]
+    for _, row in selected_municipality_data.iterrows():
+        fig.add_annotation(
+            x=row['Huishouden_Label'],
+            y=row['Waarde'],
+            text=format_dutch_currency(row['Waarde']),
+            showarrow=False,
+            xanchor='left',
+            xshift=20,
+            yshift=0,
+            font=dict(size=14, color='black')
+        )
+
+    # Create multi-line x-axis labels with specific breaks
+    label_mapping = {
+        'Alleenstaande': 'Alleenstaande',
+        'Alleenstaande ouder met kind': 'Alleenstaande<br>ouder met kind',
+        'Paar': 'Paar',
+        'Paar met twee kinderen': 'Paar met<br>twee kinderen'
+    }
+    x_labels = [label_mapping.get(label, label) for label in sorted(plot_df['Huishouden_Label'].unique())]
+
+    fig.update_layout(
+        xaxis_title="",
+        yaxis_title="",
+        height=450,
+        showlegend=False,
+        hovermode='closest',
+        dragmode=False,
+        margin=dict(t=0, b=60, l=50, r=20, autoexpand=False),
+        yaxis=dict(
+            tickprefix="€ ",
+            tickfont=dict(size=14),
+            fixedrange=True
+        ),
+        xaxis=dict(
+            tickfont=dict(size=14),
+            tickangle=0,
+            tickmode='array',
+            tickvals=sorted(plot_df['Huishouden_Label'].unique()),
+            ticktext=x_labels,
+            fixedrange=True
+        )
+    )
+
+    return fig
+
+@st.cache_data
+def create_income_figure(_df, selected_huishouden, selected_income_pct, selected_income, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
+    """Create line chart figure for income progression (Graph 2)."""
+    fig_income = go.Figure()
+
+    # Get cached data for all municipalities at specific income levels
+    income_df = get_income_progression_data(
+        _df, selected_huishouden, selected_income_pct, selected_referteperiode,
+        selected_cav, selected_fr, key=key
+    )
+
+    # Calculate income levels for x-axis ticks
+    final_digit = selected_income_pct % 10
+    z = min(max(selected_income_pct - 20, 100 + final_digit), 140 + final_digit)
+    income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
+
+    # Split data into selected and other municipalities
+    selected_marker_data = income_df[income_df['Gemeente'] == selected_gemeente].copy()
+    other_marker_data = income_df[income_df['Gemeente'] != selected_gemeente].copy()
+
+    # Add gemeente names and create hover text vectorized for other municipalities
+    other_marker_data['Gemeentenaam'] = other_marker_data['Gemeente'].map(gemeente_labels)
+    other_marker_data['hover_text'] = (
+        "<b>" + other_marker_data['Gemeentenaam'].astype(str) + "</b><br>" +
+        household_labels[selected_huishouden] + "<br>Waarde: € " +
+        other_marker_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+    )
+
+    # Single trace for all other municipalities
+    if len(other_marker_data) > 0:
+        fig_income.add_trace(go.Scatter(
+            x=other_marker_data['Inkomen'] * 100,
+            y=other_marker_data['Waarde'],
+            mode='markers',
+            name='Overige gemeenten',
+            marker=dict(
+                size=8,
+                color='#9f9f9f',
+                opacity=0.6
+            ),
+            hovertext=other_marker_data['hover_text'],
+            hoverinfo='text',
+            showlegend=False
+        ))
+
+    # Get cached line data for selected municipality
+    selected_all_df = get_income_line_data(
+        _df, selected_gemeente, selected_huishouden, selected_referteperiode,
+        selected_cav, selected_fr, key=key
+    )
+
+    selected_gemeente_name = gemeente_labels[selected_gemeente]
+    fig_income.add_trace(go.Scatter(
+        x=selected_all_df['Inkomen'] * 100,
+        y=selected_all_df['Waarde'],
+        mode='lines',
+        name=selected_gemeente_name,
+        line=dict(
+            color='#d63f44',
+            width=2
+        ),
+        hoverinfo='skip',
+        showlegend=False
+    ))
+
+    # Vectorized hover text for selected municipality
+    selected_marker_data['hover_text'] = (
+        "<b>" + selected_gemeente_name + "</b><br>" +
+        household_labels[selected_huishouden] + "<br>Waarde: € " +
+        selected_marker_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+    )
+
+    fig_income.add_trace(go.Scatter(
+        x=selected_marker_data['Inkomen'] * 100,
+        y=selected_marker_data['Waarde'],
+        mode='markers',
+        name=selected_gemeente_name,
+        marker=dict(
+            size=10,
+            color='#d63f44'
+        ),
+        hovertext=selected_marker_data['hover_text'],
+        hoverinfo='text',
+        showlegend=False
+    ))
+
+    # Add label for the selected income level
+    selected_income_value = selected_all_df[abs(selected_all_df['Inkomen'] - selected_income) < 0.001]['Waarde'].values
+    if len(selected_income_value) > 0:
+        fig_income.add_annotation(
+            x=selected_income_pct,
+            y=selected_income_value[0],
+            text=format_dutch_currency(selected_income_value[0]),
+            showarrow=False,
+            xanchor='center',
+            xshift=0,
+            yshift=15,
+            font=dict(size=14, color='black')
+        )
+
+    # Create tick values matching income_levels_to_show
+    tick_vals = [round(level * 100) for level in income_levels_to_show]
+    tick_text = [f'{val}%' for val in tick_vals]
+
+    fig_income.update_layout(
+        xaxis_title="Inkomen (% van sociaal minimum)",
+        yaxis_title="",
+        height=450,
+        hovermode='closest',
+        dragmode=False,
+        margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
+        xaxis=dict(
+            tickmode='array',
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            tickfont=dict(size=14),
+            range=[tick_vals[0] - 5, tick_vals[-1] + 5],
+            fixedrange=True
+        ),
+        yaxis=dict(
+            tickprefix="€ ",
+            tickfont=dict(size=14),
+            fixedrange=True
+        )
+    )
+
+    return fig_income
+
+@st.cache_data
+def create_formal_informal_figure(_df, selected_huishouden, selected_income, selected_income_pct, selected_referteperiode, selected_cav, selected_gemeente, gemeente_labels, household_labels, key=None):
+    """Create stacked bar chart for formal vs informal regulations (Graph 3)."""
+    # Get cached formal/informal data
+    bar_data = get_formal_informal_data(
+        _df, selected_huishouden, selected_income, selected_referteperiode,
+        selected_cav, key=key
+    )
+    bar_data['Gemeentenaam'] = bar_data['Gemeente'].map(gemeente_labels)
+    bar_data = bar_data.sort_values('Formeel', ascending=False)
+
+    # Vectorized color and hover text generation
+    is_selected = bar_data['Gemeente'] == selected_gemeente
+    colors_formal = is_selected.map({True: '#d63f44', False: '#9f9f9f'}).tolist()
+    colors_informal = is_selected.map({True: '#E68C8F', False: '#C5C5C5'}).tolist()
+
+    hover_prefix = f"{household_labels[selected_huishouden]}<br>{selected_income_pct}% sociaal minimum<br>"
+    hover_formal = (
+        hover_prefix + "Waarde formele regelingen: € " +
+        bar_data['Formeel'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) +
+        "<extra></extra>"
+    ).tolist()
+    hover_informal = (
+        hover_prefix + "Waarde informele regelingen: € " +
+        bar_data['Informeel'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) +
+        "<extra></extra>"
+    ).tolist()
+
+    fig_bar = go.Figure()
+
+    fig_bar.add_trace(go.Bar(
+        x=bar_data['Gemeentenaam'],
+        y=bar_data['Formeel'],
+        name='Formeel',
+        marker=dict(color=colors_formal),
+        hovertemplate=hover_formal
+    ))
+
+    fig_bar.add_trace(go.Bar(
+        x=bar_data['Gemeentenaam'],
+        y=bar_data['Informeel'],
+        name='Informeel',
+        marker=dict(color=colors_informal),
+        hovertemplate=hover_informal
+    ))
+
+    fig_bar.update_layout(
+        barmode='stack',
+        xaxis_title="",
+        yaxis_title="",
+        height=450,
+        showlegend=True,
+        dragmode=False,
+        margin=dict(t=0, b=100, l=50, r=20, autoexpand=False),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=0.95,
+            xanchor="right",
+            x=0.99
+        ),
+        yaxis=dict(
+            tickprefix="€ ",
+            tickfont=dict(size=14),
+            fixedrange=True
+        ),
+        xaxis=dict(
+            tickfont=dict(size=14),
+            tickangle=-45,
+            fixedrange=True
+        )
+    )
+
+    return fig_bar
+
+@st.cache_data
+def create_threshold_figure(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
+    """Create scatter plot for value vs income threshold (Graph 4)."""
+    # Get cached threshold data
+    threshold_data = get_threshold_data(
+        _df, selected_huishouden, selected_referteperiode, selected_cav,
+        selected_fr, key=key
+    )
+    threshold_data['Gemeentenaam'] = threshold_data['Gemeente'].map(gemeente_labels)
+    fig_threshold = go.Figure()
+
+    if len(threshold_data) > 0:
+        selected_threshold_data = threshold_data[threshold_data['Gemeente'] == selected_gemeente]
+        other_threshold_data = threshold_data[threshold_data['Gemeente'] != selected_gemeente]
+    else:
+        selected_threshold_data = pd.DataFrame()
+        other_threshold_data = pd.DataFrame()
+
+    if len(other_threshold_data) > 0:
+        # Vectorized hover text generation
+        other_threshold_data = other_threshold_data.copy()
+        other_threshold_data['hover_text'] = (
+            "<b>" + other_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
+            household_labels[selected_huishouden] + "<br>Inkomensgrens: " +
+            (other_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
+            "Waarde bij 100% sociaal minimum: € " +
+            other_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
+            "Inwoners: " + other_threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+        )
+
+        fig_threshold.add_trace(go.Scatter(
+            x=other_threshold_data['Inkomensgrens'] * 100,
+            y=other_threshold_data['Waarde'],
+            mode='markers',
+            marker=dict(
+                size=other_threshold_data['Inwoners'] / 10000,
+                color='#9f9f9f',
+                opacity=0.6,
+                sizemode='diameter'
+            ),
+            hovertext=other_threshold_data['hover_text'],
+            hoverinfo='text',
+            customdata=other_threshold_data['Gemeente'].values,
+            showlegend=False
+        ))
+
+    if len(selected_threshold_data) > 0:
+        # Vectorized hover text generation
+        selected_threshold_data = selected_threshold_data.copy()
+        selected_threshold_data['hover_text'] = (
+            "<b>" + selected_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
+            household_labels[selected_huishouden] + "<br>Inkomensgrens: " +
+            (selected_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
+            "Waarde bij 100% sociaal minimum: € " +
+            selected_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
+            "Inwoners: " + selected_threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+        )
+
+        fig_threshold.add_trace(go.Scatter(
+            x=selected_threshold_data['Inkomensgrens'] * 100,
+            y=selected_threshold_data['Waarde'],
+            mode='markers',
+            marker=dict(
+                size=selected_threshold_data['Inwoners'] / 10000,
+                color='#d63f44',
+                sizemode='diameter'
+            ),
+            hovertext=selected_threshold_data['hover_text'],
+            hoverinfo='text',
+            customdata=selected_threshold_data['Gemeente'].values,
+            showlegend=False
+        ))
+
+        # Add label for selected municipality
+        for _, row in selected_threshold_data.iterrows():
+            fig_threshold.add_annotation(
+                x=row['Inkomensgrens'] * 100,
+                y=row['Waarde'],
+                text=row['Gemeentenaam'],
+                showarrow=False,
+                xanchor='left',
+                xshift=10,
+                font=dict(size=12, color='black')
+            )
+
+    fig_threshold.update_layout(
+        xaxis_title="Inkomensgrens (% van sociaal minimum)",
+        yaxis_title="",
+        height=450,
+        hovermode='closest',
+        dragmode=False,
+        margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
+        xaxis=dict(
+            ticksuffix="%",
+            tickfont=dict(size=14),
+            fixedrange=True
+        ),
+        yaxis=dict(
+            tickprefix="€ ",
+            tickfont=dict(size=14),
+            fixedrange=True
+        )
+    )
+
+    return fig_threshold
+
+# ================================================================================
 # MAIN APPLICATION
 # ================================================================================
 
@@ -500,124 +926,20 @@ try:
     with tab1:
         st.header("Waarde regelingen per huishouden", anchor=False)
 
-        # Get cached data for all municipalities and all household types
-        plot_df = get_household_data(
+        fig = create_household_figure(
             df,
             selected_income,
+            selected_income_pct,
             selected_referteperiode,
             selected_cav,
             selected_fr,
+            selected_gemeente,
+            gemeente_labels,
+            household_labels,
             key=data_key
         )
-        # Add labels from the dictionaries
-        plot_df['Gemeentenaam'] = plot_df['Gemeente'].map(gemeente_labels)
-        plot_df['Huishouden_Label'] = plot_df['Huishouden'].map(household_labels)
 
-        fig = go.Figure()
-        for household in sorted(plot_df['Huishouden_Label'].unique()):
-            household_data = plot_df[plot_df['Huishouden_Label'] == household]
-
-            selected_data = household_data[household_data['Gemeente'] == selected_gemeente]
-            other_data = household_data[household_data['Gemeente'] != selected_gemeente]
-
-            if len(other_data) > 0:
-                # Vectorized hover text
-                hover_text_other = (
-                    "<b>" + other_data['Gemeentenaam'].astype(str) + "</b><br>" +
-                    f"{selected_income_pct}% sociaal minimum<br>Waarde: € " +
-                    other_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-                )
-
-                fig.add_trace(go.Box(
-                    x=[household] * len(other_data),
-                    y=other_data['Waarde'],
-                    name=household,
-                    boxpoints='all',
-                    jitter=0.3,
-                    pointpos=0,
-                    marker=dict(
-                        size=8,
-                        color='#9f9f9f',
-                        opacity=0.6
-                    ),
-                    hovertext=hover_text_other,
-                    hoverinfo='text',
-                    customdata=other_data['Gemeente'].values,
-                    showlegend=False,
-                    fillcolor='rgba(255,255,255,0)',
-                    line=dict(color='rgba(255,255,255,0)')
-                ))
-
-            if len(selected_data) > 0:
-                # Vectorized hover text
-                hover_text_selected = (
-                    "<b>" + selected_data['Gemeentenaam'].astype(str) + "</b><br>" +
-                    f"{selected_income_pct}% sociaal minimum<br>Waarde: € " +
-                    selected_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-                )
-
-                fig.add_trace(go.Box(
-                    x=[household] * len(selected_data),
-                    y=selected_data['Waarde'],
-                    name=household,
-                    boxpoints='all',
-                    jitter=0.3,
-                    pointpos=0,
-                    marker=dict(
-                        size=10,
-                        color='#d63f44',
-                    ),
-                    hovertext=hover_text_selected,
-                    hoverinfo='text',
-                    customdata=selected_data['Gemeente'].values,
-                    showlegend=False,
-                    fillcolor='rgba(255,255,255,0)',
-                    line=dict(color='rgba(255,255,255,0)')
-                ))
-
-        selected_municipality_data = plot_df[plot_df['Gemeente'] == selected_gemeente]
-        for _, row in selected_municipality_data.iterrows():
-            fig.add_annotation(
-                x=row['Huishouden_Label'],
-                y=row['Waarde'],
-                text=format_dutch_currency(row['Waarde']),
-                showarrow=False,
-                xanchor='left',
-                xshift=20,
-                yshift=0,
-                font=dict(size=14, color='black')
-            )
-
-        # Create multi-line x-axis labels with specific breaks
-        label_mapping = {
-            'Alleenstaande': 'Alleenstaande',
-            'Alleenstaande ouder met kind': 'Alleenstaande<br>ouder met kind',
-            'Paar': 'Paar',
-            'Paar met twee kinderen': 'Paar met<br>twee kinderen'
-        }
-        x_labels = [label_mapping.get(label, label) for label in sorted(plot_df['Huishouden_Label'].unique())]
-
-        fig.update_layout(
-            xaxis_title="",
-            yaxis_title="",
-            height=450,
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(t=0, b=60, l=50, r=20, autoexpand=False),
-            yaxis=dict(
-                tickprefix="€ ",
-                tickfont=dict(size=14)
-            ),
-            xaxis=dict(
-                tickfont=dict(size=14),
-                tickangle=0,
-                tickmode='array',
-                tickvals=sorted(plot_df['Huishouden_Label'].unique()),
-                ticktext=x_labels
-            )
-        )
-
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
         st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen waar de vier voorbeeldhuishoudens recht op hebben bij een inkomen van {selected_income_pct}% van het sociaal minimum*")
 
@@ -627,221 +949,43 @@ try:
     with tab2:
         st.header("Waarde regelingen per inkomensgroep", anchor=False)
 
-        selected_gemeente_name = gemeente_labels[selected_gemeente]
-
-        fig_income = go.Figure()
-
-        # Get cached data for all municipalities at specific income levels
-        income_df = get_income_progression_data(
+        fig_income = create_income_figure(
             df,
             selected_huishouden,
             selected_income_pct,
+            selected_income,
             selected_referteperiode,
             selected_cav,
             selected_fr,
-            key=data_key
-        )
-
-        # Calculate income levels for x-axis ticks
-        final_digit = selected_income_pct % 10
-        z = min(max(selected_income_pct - 20, 100 + final_digit), 140 + final_digit)
-        income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
-
-        # Split data into selected and other municipalities
-        selected_marker_data = income_df[income_df['Gemeente'] == selected_gemeente].copy()
-        other_marker_data = income_df[income_df['Gemeente'] != selected_gemeente].copy()
-
-        # Add gemeente names and create hover text vectorized for other municipalities
-        other_marker_data['Gemeentenaam'] = other_marker_data['Gemeente'].map(gemeente_labels)
-        other_marker_data['hover_text'] = (
-            "<b>" + other_marker_data['Gemeentenaam'].astype(str) + "</b><br>" +
-            household_labels[selected_huishouden] + "<br>Waarde: € " +
-            other_marker_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-        )
-
-        # Single trace for all other municipalities
-        if len(other_marker_data) > 0:
-            fig_income.add_trace(go.Scatter(
-                x=other_marker_data['Inkomen'] * 100,
-                y=other_marker_data['Waarde'],
-                mode='markers',
-                name='Overige gemeenten',
-                marker=dict(
-                    size=8,
-                    color='#9f9f9f',
-                    opacity=0.6
-                ),
-                hovertext=other_marker_data['hover_text'],
-                hoverinfo='text',
-                showlegend=False
-            ))
-
-        # Get cached line data for selected municipality
-        selected_all_df = get_income_line_data(
-            df,
             selected_gemeente,
-            selected_huishouden,
-            selected_referteperiode,
-            selected_cav,
-            selected_fr,
+            gemeente_labels,
+            household_labels,
             key=data_key
         )
 
-        fig_income.add_trace(go.Scatter(
-            x=selected_all_df['Inkomen'] * 100,
-            y=selected_all_df['Waarde'],
-            mode='lines',
-            name=selected_gemeente_name,
-            line=dict(
-                color='#d63f44',
-                width=2
-            ),
-            hoverinfo='skip',
-            showlegend=False
-        ))
-
-        # Vectorized hover text for selected municipality
-        selected_marker_data['hover_text'] = (
-            "<b>" + selected_gemeente_name + "</b><br>" +
-            household_labels[selected_huishouden] + "<br>Waarde: € " +
-            selected_marker_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-        )
-
-        fig_income.add_trace(go.Scatter(
-            x=selected_marker_data['Inkomen'] * 100,
-            y=selected_marker_data['Waarde'],
-            mode='markers',
-            name=selected_gemeente_name,
-            marker=dict(
-                size=10,
-                color='#d63f44'
-            ),
-            hovertext=selected_marker_data['hover_text'],
-            hoverinfo='text',
-            showlegend=False
-        ))
-
-        # Add label for the selected income level
-        # Find the value at the selected income level from the line data (use abs() for float comparison)
-        selected_income_value = selected_all_df[abs(selected_all_df['Inkomen'] - selected_income) < 0.001]['Waarde'].values
-        if len(selected_income_value) > 0:
-            fig_income.add_annotation(
-                x=selected_income_pct,
-                y=selected_income_value[0],
-                text=format_dutch_currency(selected_income_value[0]),
-                showarrow=False,
-                xanchor='center',
-                xshift=0,
-                yshift=15,
-                font=dict(size=14, color='black')
-            )
-
-        # Create tick values matching income_levels_to_show
-        tick_vals = [round(level * 100) for level in income_levels_to_show]
-        tick_text = [f'{val}%' for val in tick_vals]
-
-        fig_income.update_layout(
-            xaxis_title="Inkomen (% van sociaal minimum)",
-            yaxis_title="",
-            height=450,
-            hovermode='closest',
-            margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
-            xaxis=dict(
-                tickmode='array',
-                tickvals=tick_vals,
-                ticktext=tick_text,
-                tickfont=dict(size=14),
-                range=[tick_vals[0] - 5, tick_vals[-1] + 5]
-            ),
-            yaxis=dict(
-                tickprefix="€ ",
-                tickfont=dict(size=14)
-            )
-        )
-
-        st.plotly_chart(fig_income, width='stretch')
+        st.plotly_chart(fig_income, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
         st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen voor een {household_labels[selected_huishouden].lower()} bij verschillende inkomensniveaus*")
     # ----------------------------------------------------------------------------
     # Graph 3: Formal vs Informal
     # ----------------------------------------------------------------------------
     with tab3:
-        selected_gemeente_name = gemeente_labels[selected_gemeente]
+        st.header("Formele en informele waarden", anchor=False)
 
-        # Get cached formal/informal data
-        bar_data = get_formal_informal_data(
+        fig_bar = create_formal_informal_figure(
             df,
             selected_huishouden,
             selected_income,
+            selected_income_pct,
             selected_referteperiode,
             selected_cav,
+            selected_gemeente,
+            gemeente_labels,
+            household_labels,
             key=data_key
         )
-        bar_data['Gemeentenaam'] = bar_data['Gemeente'].map(gemeente_labels)
-        bar_data = bar_data.sort_values('Formeel', ascending=False)
 
-        st.header("Formele en informele waarden", anchor=False)
-
-        # Vectorized color and hover text generation
-        is_selected = bar_data['Gemeente'] == selected_gemeente
-        colors_formal = is_selected.map({True: '#d63f44', False: '#9f9f9f'}).tolist()
-        colors_informal = is_selected.map({True: '#E68C8F', False: '#C5C5C5'}).tolist()
-
-        hover_prefix = f"{household_labels[selected_huishouden]}<br>{selected_income_pct}% sociaal minimum<br>"
-        hover_formal = (
-            hover_prefix + "Waarde formele regelingen: € " +
-            bar_data['Formeel'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) +
-            "<extra></extra>"
-        ).tolist()
-        hover_informal = (
-            hover_prefix + "Waarde informele regelingen: € " +
-            bar_data['Informeel'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) +
-            "<extra></extra>"
-        ).tolist()
-
-        fig_bar = go.Figure()
-
-        fig_bar.add_trace(go.Bar(
-            x=bar_data['Gemeentenaam'],
-            y=bar_data['Formeel'],
-            name='Formeel',
-            marker=dict(color=colors_formal),
-            hovertemplate=hover_formal
-        ))
-
-        fig_bar.add_trace(go.Bar(
-            x=bar_data['Gemeentenaam'],
-            y=bar_data['Informeel'],
-            name='Informeel',
-            marker=dict(color=colors_informal),
-            hovertemplate=hover_informal
-        ))
-
-        fig_bar.update_layout(
-            barmode='stack',
-            xaxis_title="",
-            yaxis_title="",
-            height=450,
-            showlegend=True,
-            margin=dict(t=0, b=100, l=50, r=20, autoexpand=False),
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=0.95,
-                xanchor="right",
-                x=0.99
-            ),
-            yaxis=dict(
-                tickprefix="€ ",
-                tickfont=dict(size=14)
-            ),
-            xaxis=dict(
-                tickfont=dict(size=14),
-                tickangle=-45
-            )
-        )
-
-        st.plotly_chart(fig_bar, width='stretch')
+        st.plotly_chart(fig_bar, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
         st.markdown(f"*Waarde formele en informele gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op {selected_income_pct}% van het sociaal minimum*")
 
@@ -851,109 +995,19 @@ try:
     with tab4:
         st.header("Waarde en gemiddelde inkomensgrens", anchor=False)
 
-        # Get cached threshold data
-        threshold_data = get_threshold_data(
+        fig_threshold = create_threshold_figure(
             df,
             selected_huishouden,
             selected_referteperiode,
             selected_cav,
             selected_fr,
+            selected_gemeente,
+            gemeente_labels,
+            household_labels,
             key=data_key
         )
-        threshold_data['Gemeentenaam'] = threshold_data['Gemeente'].map(gemeente_labels)
-        fig_threshold = go.Figure()
 
-        if len(threshold_data) > 0:
-            selected_threshold_data = threshold_data[threshold_data['Gemeente'] == selected_gemeente]
-            other_threshold_data = threshold_data[threshold_data['Gemeente'] != selected_gemeente]
-        else:
-            selected_threshold_data = pd.DataFrame()
-            other_threshold_data = pd.DataFrame()
-
-        if len(other_threshold_data) > 0:
-            # Vectorized hover text generation
-            other_threshold_data = other_threshold_data.copy()
-            other_threshold_data['hover_text'] = (
-                "<b>" + other_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
-                household_labels[selected_huishouden] + "<br>Inkomensgrens: " +
-                (other_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
-                "Waarde bij 100% sociaal minimum: € " +
-                other_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
-                "Inwoners: " + other_threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-            )
-
-            fig_threshold.add_trace(go.Scatter(
-                x=other_threshold_data['Inkomensgrens'] * 100,
-                y=other_threshold_data['Waarde'],
-                mode='markers',
-                marker=dict(
-                    size=other_threshold_data['Inwoners'] / 10000,
-                    color='#9f9f9f',
-                    opacity=0.6,
-                    sizemode='diameter'
-                ),
-                hovertext=other_threshold_data['hover_text'],
-                hoverinfo='text',
-                customdata=other_threshold_data['Gemeente'].values,
-                showlegend=False
-            ))
-
-        if len(selected_threshold_data) > 0:
-            # Vectorized hover text generation
-            selected_threshold_data = selected_threshold_data.copy()
-            selected_threshold_data['hover_text'] = (
-                "<b>" + selected_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
-                household_labels[selected_huishouden] + "<br>Inkomensgrens: " +
-                (selected_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
-                "Waarde bij 100% sociaal minimum: € " +
-                selected_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
-                "Inwoners: " + selected_threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-            )
-
-            fig_threshold.add_trace(go.Scatter(
-                x=selected_threshold_data['Inkomensgrens'] * 100,
-                y=selected_threshold_data['Waarde'],
-                mode='markers',
-                marker=dict(
-                    size=selected_threshold_data['Inwoners'] / 10000,
-                    color='#d63f44',
-                    sizemode='diameter'
-                ),
-                hovertext=selected_threshold_data['hover_text'],
-                hoverinfo='text',
-                customdata=selected_threshold_data['Gemeente'].values,
-                showlegend=False
-            ))
-
-            # Add label for selected municipality
-            for _, row in selected_threshold_data.iterrows():
-                fig_threshold.add_annotation(
-                    x=row['Inkomensgrens'] * 100,
-                    y=row['Waarde'],
-                    text=row['Gemeentenaam'],
-                    showarrow=False,
-                    xanchor='left',
-                    xshift=10,
-                    font=dict(size=12, color='black')
-                )
-
-        fig_threshold.update_layout(
-            xaxis_title="Inkomensgrens (% van sociaal minimum)",
-            yaxis_title="",
-            height=450,
-            hovermode='closest',
-            margin=dict(t=0, b=50, l=50, r=20, autoexpand=False),
-            xaxis=dict(
-                ticksuffix="%",
-                tickfont=dict(size=14)
-            ),
-            yaxis=dict(
-                tickprefix="€ ",
-                tickfont=dict(size=14)
-            )
-        )
-
-        st.plotly_chart(fig_threshold, width='stretch')
+        st.plotly_chart(fig_threshold, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
         st.markdown(f"*Waarde gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen die de gemeente hanteert voor dit huishouden*")
 
     # ----------------------------------------------------------------------------
@@ -1095,7 +1149,7 @@ try:
                 styled_df,
                 hide_index=True,
                 height=table_height,
-                use_container_width=True,
+                width='stretch',
                 column_config={
                     "Regelingen": st.column_config.TextColumn(
                         "Regelingen",
