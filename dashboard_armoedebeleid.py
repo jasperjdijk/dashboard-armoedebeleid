@@ -34,6 +34,10 @@ st.markdown("""
         min-width: 260px;
         max-width: 260px;
     }
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        min-width: 0px;
+        max-width: 0px;
+    }
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
     }
@@ -837,31 +841,57 @@ try:
             key="huishouden"
         )
 
-        selected_referteperiode = st.pills(
-            "Jaren met laag inkomen:",
-            options=[0, 1, 2, 3, 4, 5],
+        selected_referteperiode = st.segmented_control(
+            "Jaren met laag inkomen",
+            options=[0, 1, 3, 5],
             default=default_refper if default_refper in [0, 1, 2, 3, 4, 5] else 0,
-            key="referteperiode"
+            key="referteperiode",
+            help="Jaren dat het voorbeeldhuishouden al het geselecteerde inkomen heeft (referteperiode)"
         )
 
-        # Toggle buttons for regulation types
-        # Default: formeel and informeel ON, CAV OFF (unless URL specifies otherwise)
+        # Regulation type selector (multi-select)
         has_reg_param = params.get("reg") is not None
 
-        # Ensure at least one of formeel/informeel is always on (check BEFORE creating widgets)
-        if "toggle_formeel" in st.session_state and "toggle_informeel" in st.session_state:
-            if not st.session_state.toggle_formeel and not st.session_state.toggle_informeel:
-                # Check which one was just turned off by comparing to URL params
-                if "f" in default_regelingen and "i" not in default_regelingen:
-                    # User had only formeel on, turned it off -> force informeel on
-                    st.session_state.toggle_informeel = True
-                else:
-                    # User had informeel on (or both), turned one off -> force formeel on
-                    st.session_state.toggle_formeel = True
+        # Determine default value for regulation type selector
+        if has_reg_param:
+            default_reg_types = []
+            if "f" in default_regelingen:
+                default_reg_types.append("Formeel")
+            if "i" in default_regelingen:
+                default_reg_types.append("Informeel")
+            # Ensure at least one is selected
+            if not default_reg_types:
+                default_reg_types = ["Formeel", "Informeel"]
+        else:
+            default_reg_types = ["Formeel", "Informeel"]
 
-        st.markdown("**Type regelingen:**")
-        toggle_formeel = st.toggle("Formele regelingen", value="f" in default_regelingen if has_reg_param else True, key="toggle_formeel")
-        toggle_informeel = st.toggle("Informele regelingen", value="i" in default_regelingen if has_reg_param else True, key="toggle_informeel")
+        # Handle auto-toggle logic: if session state exists and is empty, determine which option to auto-select
+        if "reg_types" in st.session_state:
+            current_value = st.session_state.reg_types
+            if not current_value or len(current_value) == 0:
+                # Get previous value from query params to determine what was selected before
+                if "f" in default_regelingen and "i" not in default_regelingen:
+                    # Had only Formeel, switch to Informeel
+                    st.session_state.reg_types = ["Informeel"]
+                    st.rerun()
+                elif "i" in default_regelingen and "f" not in default_regelingen:
+                    # Had only Informeel, switch to Formeel
+                    st.session_state.reg_types = ["Formeel"]
+                    st.rerun()
+                else:
+                    # Default to Formeel
+                    st.session_state.reg_types = ["Formeel"]
+                    st.rerun()
+
+        selected_reg_types = st.segmented_control(
+            "Type regelingen",
+            options=["Formeel", "Informeel"],
+            default=default_reg_types,
+            selection_mode="multi",
+            key="reg_types",
+            help="Selecteer welke regelingen worden meegenomen: formele, informele of beide"
+        )
+
         toggle_cav = st.toggle("Korting gemeentepolis", value="k" in default_regelingen if has_reg_param else False, key="toggle_cav")
 
         # Legend
@@ -885,11 +915,11 @@ try:
     new_params["gm"] = selected_gemeente
     new_params["hh"] = selected_huishouden
     new_params["ref"] = str(selected_referteperiode)
-    # Build reg parameter from toggles
+    # Build reg parameter from regulation type selector
     reg_codes = []
-    if toggle_formeel:
+    if "Formeel" in selected_reg_types:
         reg_codes.append("f")
-    if toggle_informeel:
+    if "Informeel" in selected_reg_types:
         reg_codes.append("i")
     if toggle_cav:
         reg_codes.append("k")
@@ -897,13 +927,13 @@ try:
         new_params["reg"] = ",".join(reg_codes)
     st.query_params.update(new_params)
 
-    # Calculate CAV/FR parameters from toggles
+    # Calculate CAV/FR parameters
     selected_cav = 1 if toggle_cav else 0
-    if toggle_formeel and toggle_informeel:
+    if "Formeel" in selected_reg_types and "Informeel" in selected_reg_types:
         selected_fr = "all"
-    elif toggle_formeel:
+    elif "Formeel" in selected_reg_types:
         selected_fr = "Ja"
-    elif toggle_informeel:
+    elif "Informeel" in selected_reg_types:
         selected_fr = "Nee"
     else:
         selected_fr = "all"
@@ -1149,7 +1179,6 @@ try:
                 styled_df,
                 hide_index=True,
                 height=table_height,
-                width='stretch',
                 column_config={
                     "Regelingen": st.column_config.TextColumn(
                         "Regelingen",
