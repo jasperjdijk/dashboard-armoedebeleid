@@ -889,25 +889,27 @@ try:
         else:
             default_reg_types = ["Formeel", "Informeel"]
 
-        # Handle auto-toggle logic: if session state exists and is empty, toggle to the other option
-        if "reg_types" in st.session_state:
-            current_value = st.session_state.reg_types
-            if not current_value or len(current_value) == 0:
-                # Toggle based on previous value
-                if default_fr == 1:
-                    st.session_state.reg_types = ["Informeel"]
-                elif default_fr == 2:
-                    st.session_state.reg_types = ["Formeel"]
-                else:
-                    st.session_state.reg_types = ["Formeel"]
-                st.rerun()
+        # Initialize session state if it doesn't exist
+        if "reg_types" not in st.session_state:
+            st.session_state.reg_types = default_reg_types
+
+        # Handle auto-toggle logic: if session state is empty, toggle to the other option
+        current_value = st.session_state.reg_types
+        if not current_value or len(current_value) == 0:
+            # Toggle based on previous value
+            if default_fr == 1:
+                st.session_state.reg_types = ["Informeel"]
+            elif default_fr == 2:
+                st.session_state.reg_types = ["Formeel"]
+            else:
+                st.session_state.reg_types = ["Formeel"]
+            st.rerun()
 
         # Regulation type values: Formeel=1, Informeel=2, both=3
         reg_type_values = {"Formeel": 1, "Informeel": 2}
         selected_reg_types = st.segmented_control(
             "Type regelingen",
             options=list(reg_type_values.keys()),
-            default=default_reg_types,
             selection_mode="multi",
             key="reg_types",
             help="Selecteer welke regelingen worden meegenomen: formele, informele of beide"
