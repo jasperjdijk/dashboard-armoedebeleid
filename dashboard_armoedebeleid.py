@@ -259,7 +259,7 @@ def get_threshold_data(_df, selected_huishouden, selected_referteperiode, select
             gmcode=gmcode)
 
         wrd_at_100 = df['WRD'].sum() / 12
-        weighted_sum = df['WRD'] * (df['IG'] - 1).sum() /12
+        weighted_sum = (df['WRD'] * (df['IG'] - 1)).sum() /12
 
         if wrd_at_100 > 0:
             weighted_ig = 1 + (weighted_sum / wrd_at_100)
