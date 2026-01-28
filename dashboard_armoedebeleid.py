@@ -74,12 +74,18 @@ def load_data(key):
 
 
 @st.cache_data
-def get_alle_gemeenten(_df):
+def get_alle_gemeenten(_df, key):
     """Get all unique municipality codes from the dataframe (cached)."""
     return _df['GMcode'].unique()
 
 
-def apply_filters(hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
+def format_dutch_currency(value, decimals=0):
+    """Format number as Dutch currency (dot for thousands, comma for decimals)."""
+    formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f"€ {formatted}"
+
+
+def filter_regelingen(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
     """
     Apply standard filters to the dataframe and return a boolean mask.
 
@@ -99,13 +105,9 @@ def apply_filters(hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
         Formal regulation filter: 1 = formal, 2 = informal, 3 = both
     gmcode : str, optional
         Municipality code. If None, applies to all municipalities.
-
-    Returns:
-    --------
-    pd.Series
-        Boolean mask for filtering the dataframe
     """
-    ig_col, ref_col = f'IG_{hh}', f'Referteperiode_{hh}'
+
+    wrd_col, ig_col, ref_col = f'WRD_{hh}', f'IG_{hh}', f'Referteperiode_{hh}'
 
     mask = (df['WB'] == 1) & (df[ig_col] >= ink) & (df[ref_col] <= refper)
 
@@ -122,62 +124,11 @@ def apply_filters(hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
     elif fr == 2:
         mask &= (df['FR'] == 'Nee')
 
-    return mask
-
-
-def filter_regelingen2(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
-    return df[apply_filters(hh, ink, refper, cav, fr, gmcode)]
-    
-
-def filter_regelingen(df, gmcode, hh, ink=1, refper=0, cav=0, fr=3, result="sum"):
-    """
-    Filter and aggregate benefits from Totaaloverzicht based on criteria.
-
-    Parameters:
-    -----------
-    df : DataFrame
-        The Totaaloverzicht dataframe containing all regulation data
-    gmcode : str
-        Municipality code (e.g., 'GM0363' for Amsterdam)
-    hh : str
-        Household type code: 'HH01' (single), 'HH02' (single parent),
-        'HH03' (couple), or 'HH04' (couple with children)
-    ink : float
-        Income level as fraction of social minimum (1.0 = 100%, 1.5 = 150%)
-    refper : int
-        Required years at low income (0-5)
-    cav : int
-        Include health insurance discount (CAV): 0 = no, 1 = yes
-    result : str
-        Return type: 'sum' for total value, 'ig' for weighted income threshold,
-        'list' for detailed regulation list
-    fr : str
-        Formal regulation filter: 1 = formele regelingen, 2 = informele regelingen, 3 = beide
-    Returns:
-    --------
-    float or list
-        If result='sum': Monthly total value (€)
-        If result='ig': Weighted sum for income threshold calculation
-        If result='list': List of dicts with 'name' and 'amount' keys
-    """
-    wrd_col, ig_col = f'WRD_{hh}', f'IG_{hh}'
-
-    filtered = df[apply_filters(hh, ink, refper, cav, fr, gmcode)].copy()
-
-    if result == "ig":
-        filtered['contribution'] = filtered[wrd_col] * (filtered[ig_col] - 1.0)
-        return filtered['contribution'].sum() / 12
-
-    if result == "sum":
-        return filtered[wrd_col].sum() / 12
-
-    # result=="list": return set of matching regulation IDs
-    return set(filtered['ID'])
-
-def format_dutch_currency(value, decimals=0):
-    """Format number as Dutch currency (dot for thousands, comma for decimals)."""
-    formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-    return f"€ {formatted}"
+    return df[mask].rename(columns={
+        ig_col: 'IG',
+        ref_col: 'Referteperiode',
+        wrd_col: 'WRD'
+    })
 
 
 # ================================================================================
@@ -188,7 +139,7 @@ def regelingen_lijst(_df, gmcode, hh, ink, refper, cav, fr, key=None):
     """Get table data for all regulations, with matching status. Sorted: matching by value, non-matching alphabetically."""
     wrd_col, ig_col = f'WRD_{hh}', f'IG_{hh}'
     regs = _df[_df['GMcode'] == gmcode]
-    df = filter_regelingen2(_df, hh, ink, refper, cav, fr, gmcode)
+    df = filter_regelingen(_df, hh, ink, refper, cav, fr, gmcode)
     matching_ids = df['ID']
 
     grouped = regs.assign(
@@ -210,13 +161,12 @@ def regelingen_lijst(_df, gmcode, hh, ink, refper, cav, fr, key=None):
 @st.cache_data
 def get_household_data(_df, ink, refper, cav, fr, key=None):
     """Calculate values for all municipalities and all household types (Graph 1)."""
-    alle_gemeenten = get_alle_gemeenten(_df)
+    alle_gemeenten = get_alle_gemeenten(_df, key)
     results = []
 
     for hh in ['HH01', 'HH02', 'HH03', 'HH04']:
-        wrd_col = f'WRD_{hh}'
-        df = filter_regelingen2(_df, hh, ink, refper, cav, fr)
-        hh_data = (df.groupby('GMcode')[wrd_col].sum() / 12)
+        df = filter_regelingen(_df, hh, ink, refper, cav, fr)
+        hh_data = (df.groupby('GMcode')['WRD'].sum() / 12)
         hh_data = hh_data.reindex(alle_gemeenten, fill_value=0)
         hh_data = hh_data.reset_index()
         hh_data.columns = ['Gemeente', 'Waarde']
@@ -226,116 +176,90 @@ def get_household_data(_df, ink, refper, cav, fr, key=None):
     return pd.concat(results, ignore_index=True)
 
 @st.cache_data
-def get_income_progression_data(_df, selected_huishouden, selected_income_pct, selected_referteperiode, selected_cav, selected_fr, key=None):
+def get_income_progression_data(_df, hh, ink, refper, cav, fr, key=None):
     """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
     # Calculate income levels to show based on selected income
-    final_digit = selected_income_pct % 10
-    z = min(max(selected_income_pct - 20, 100 + final_digit), 140 + final_digit)
+    final_digit = ink % 10
+    z = min(max(ink - 20, 100 + final_digit), 140 + final_digit)
     income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
 
-    gemeente_codes = get_alle_gemeenten(_df)
-    all_values = []
-    for gmcode in gemeente_codes:
-        for income_level in income_levels_to_show:
-            total_value = filter_regelingen(
-                df=_df,
-                gmcode=gmcode,
-                hh=selected_huishouden,
-                ink=income_level,
-                refper=selected_referteperiode,
-                cav=selected_cav,
-                fr=selected_fr
-            )
-            all_values.append({
-                'Gemeente': gmcode,
-                'Inkomen': income_level,
-                'Waarde': total_value
-            })
-    return pd.DataFrame(all_values)
+    alle_gemeenten = get_alle_gemeenten(_df, key)
+    results = []
+ 
+    for income_level in income_levels_to_show:
+        df = filter_regelingen(_df, hh, income_level, refper, cav, fr)
+        ink_data = (df.groupby('GMcode')['WRD'].sum() / 12)
+        ink_data = ink_data.reindex(alle_gemeenten, fill_value=0)
+        ink_data = ink_data.reset_index()
+        ink_data.columns = ['Gemeente', 'Waarde']
+        ink_data['Inkomen'] = income_level
+        results.append(ink_data)
+
+    return pd.concat(results, ignore_index=True)
 
 @st.cache_data
-def get_income_line_data(_df, selected_gemeente, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, key=None):
+def get_income_line_data(_df, gmcode, hh, refper, cav, fr, key=None):
     """Calculate values for selected municipality at all income levels (Graph 2 line)."""
     all_income_levels = [i/100 for i in range(100, 201, 1)]
-    selected_all_data = []
+    results = []
     for income_level in all_income_levels:
-        total_value = filter_regelingen(
-            df=_df,
-            gmcode=selected_gemeente,
-            hh=selected_huishouden,
-            ink=income_level,
-            refper=selected_referteperiode,
-            cav=selected_cav,
-            fr=selected_fr
-        )
-        selected_all_data.append({
+        df = filter_regelingen(_df, hh, income_level, refper, cav, fr, gmcode)
+         
+        results.append({
             'Inkomen': income_level,
-            'Waarde': total_value
+            'Waarde': df['WRD'].sum() / 12
         })
-    return pd.DataFrame(selected_all_data)
+
+    return pd.DataFrame(results)
 
 @st.cache_data
-def get_formal_informal_data(_df, selected_huishouden, selected_income, selected_referteperiode, selected_cav, key=None):
+def get_formal_informal_data(_df, hh, ink, refper, cav, key=None):
     """Calculate formal and informal values for all municipalities (Graph 3)."""
-    gemeente_codes = get_alle_gemeenten(_df)
-    bar_data_values = []
-    for gmcode in gemeente_codes:
-        formal_value = filter_regelingen(
-            df=_df,
-            gmcode=gmcode,
-            hh=selected_huishouden,
-            ink=selected_income,
-            fr=1,
-            refper=selected_referteperiode,
-            cav=selected_cav
-        )
-        informal_value = filter_regelingen(
-            df=_df,
-            gmcode=gmcode,
-            hh=selected_huishouden,
-            ink=selected_income,
-            fr=2,
-            refper=selected_referteperiode,
-            cav=selected_cav
-        )
-        bar_data_values.append({
-            'Gemeente': gmcode,
-            'Formeel': formal_value,
-            'Informeel': informal_value,
-            'Totaal': formal_value + informal_value
-        })
-    return pd.DataFrame(bar_data_values)
+    gemeente_codes = get_alle_gemeenten(_df, key)
+    df = filter_regelingen(
+        df=_df,
+        hh=hh,
+        ink=ink,
+        refper=refper,
+        cav=cav,
+        fr=3,
+        gmcode=None
+    )
+
+    grouped = (
+        df.groupby(['GMcode', 'FR'])['WRD']
+        .sum()
+        .div(12)
+        .unstack('FR', fill_value=0)
+        .rename(columns={'Ja': 'Formeel', 'Nee': 'Informeel'})
+        .reindex(gemeente_codes, fill_value=0)
+        .reset_index()
+        .rename(columns={'GMcode': 'Gemeente'})
+    )
+    grouped['Totaal'] = grouped['Formeel'] + grouped['Informeel']
+    return grouped
 
 @st.cache_data
 def get_threshold_data(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, key=None):
     """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
-    gemeente_codes = get_alle_gemeenten(_df)
+    gemeente_codes = get_alle_gemeenten(_df, key)
     threshold_data_values = []
     for gmcode in gemeente_codes:
         gemeente_regs = _df[_df['GMcode'] == gmcode]
         if len(gemeente_regs) == 0:
             continue
 
-        wrd_at_100 = filter_regelingen(
+        df = filter_regelingen(
             df=_df,
-            gmcode=gmcode,
-            hh=selected_huishouden,
-            ink=1.0,
-            refper=selected_referteperiode,
-            cav=selected_cav,
-            fr=selected_fr
-        )
-
-        weighted_sum = filter_regelingen(
-            df=_df,
-            gmcode=gmcode,
             hh=selected_huishouden,
             ink=1.0,
             refper=selected_referteperiode,
             cav=selected_cav,
             fr=selected_fr,
-            result="ig"
-        )
+            gmcode=gmcode)
+
+        wrd_at_100 = df['WRD'].sum() / 12
+        weighted_sum = df['WRD'] * (df['IG'] - 1).sum() /12
 
         if wrd_at_100 > 0:
             weighted_ig = 1 + (weighted_sum / wrd_at_100)
