@@ -921,6 +921,32 @@ try:
 
         st.plotly_chart(fig, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
+        # Export data to CSV - only show if ?export=1 in URL
+        try:
+            # Try newer Streamlit API first
+            show_export = st.query_params.get("export") == "1"
+        except AttributeError:
+            # Fallback to older API
+            query_params = st.experimental_get_query_params()
+            show_export = query_params.get("export", ["0"])[0] == "1"
+
+        if show_export:
+            plot_df = get_household_data(df, selected_income, selected_referteperiode, selected_cav, selected_fr, key=data_key)
+            plot_df['Gemeentenaam'] = plot_df['Gemeente'].map(gemeente_labels)
+            plot_df['Huishouden_Label'] = plot_df['Huishouden'].map(household_labels)
+
+            export_df = plot_df[['Huishouden_Label', 'Gemeentenaam', 'Waarde']].copy()
+            export_df.columns = ['Huishoudtype', 'Gemeente', 'Waarde (€ per maand)']
+            export_df = export_df.sort_values(['Huishoudtype', 'Gemeente'])
+
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exporteer data als CSV",
+                data=csv_data,
+                file_name=f"huishoudtypen_{selected_income_pct}pct.csv",
+                mime="text/csv"
+            )
+
         st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen waar de vier voorbeeldhuishoudens recht op hebben bij een inkomen van {selected_income_pct}% van het sociaal minimum*")
 
     # ----------------------------------------------------------------------------
@@ -945,6 +971,27 @@ try:
 
         st.plotly_chart(fig_income, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
+        # Export data to CSV - only show if ?export=1 in URL
+        if show_export:
+            income_markers_df = get_income_progression_data(
+                df, selected_huishouden, selected_income_pct, selected_referteperiode,
+                selected_cav, selected_fr, key=data_key
+            )
+            income_markers_df['Gemeentenaam'] = income_markers_df['Gemeente'].map(gemeente_labels)
+            income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] * 100).round(0).astype(int).astype(str) + '%'
+
+            export_df = income_markers_df[['Inkomensniveau', 'Gemeentenaam', 'Waarde']].copy()
+            export_df.columns = ['Inkomensniveau', 'Gemeente', 'Waarde (€ per maand)']
+            export_df = export_df.sort_values(['Gemeente', 'Inkomensniveau'])
+
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exporteer data als CSV",
+                data=csv_data,
+                file_name=f"inkomensgroepen_{household_labels[selected_huishouden].replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
+
         st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen voor een {household_labels[selected_huishouden].lower()} bij verschillende inkomensniveaus*")
     # ----------------------------------------------------------------------------
     # Graph 3: Formal vs Informal
@@ -967,6 +1014,32 @@ try:
 
         st.plotly_chart(fig_bar, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
+        # Export data to CSV - only show if ?export=1 in URL
+        if show_export:
+            bar_data = get_formal_informal_data(
+                df, selected_huishouden, selected_income, selected_referteperiode,
+                selected_cav, key=data_key
+            )
+            bar_data['Gemeentenaam'] = bar_data['Gemeente'].map(gemeente_labels)
+
+            # Melt to long format for export
+            export_df = bar_data[['Gemeentenaam', 'Formeel', 'Informeel']].melt(
+                id_vars=['Gemeentenaam'],
+                value_vars=['Formeel', 'Informeel'],
+                var_name='Type',
+                value_name='Waarde (€ per maand)'
+            )
+            export_df.columns = ['Gemeente', 'Type', 'Waarde (€ per maand)']
+            export_df = export_df.sort_values(['Type', 'Gemeente'])
+
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exporteer data als CSV",
+                data=csv_data,
+                file_name=f"formeel_informeel_{household_labels[selected_huishouden].replace(' ', '_')}_{selected_income_pct}pct.csv",
+                mime="text/csv"
+            )
+
         st.markdown(f"*Waarde formele en informele gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op {selected_income_pct}% van het sociaal minimum*")
 
     # ----------------------------------------------------------------------------
@@ -988,6 +1061,28 @@ try:
         )
 
         st.plotly_chart(fig_threshold, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
+
+        # Export data to CSV - only show if ?export=1 in URL
+        if show_export:
+            threshold_data = get_threshold_data(
+                df, selected_huishouden, selected_referteperiode, selected_cav,
+                selected_fr, key=data_key
+            )
+            threshold_data['Gemeentenaam'] = threshold_data['Gemeente'].map(gemeente_labels)
+            threshold_data['Inkomensgrens_Pct'] = (threshold_data['Inkomensgrens'] * 100).round(0).astype(int)
+
+            export_df = threshold_data[['Gemeentenaam', 'Inkomensgrens_Pct', 'Waarde', 'Inwoners']].copy()
+            export_df.columns = ['Gemeente', 'Gewogen gemiddelde inkomensgrens (%)', 'Waarde bij 100% (€ per maand)', 'Inwoners']
+            export_df = export_df.sort_values('Gemeente')
+
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exporteer data als CSV",
+                data=csv_data,
+                file_name=f"waarden_inkomensgrenzen_{household_labels[selected_huishouden].replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
+
         st.markdown(f"*Waarde gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen die de gemeente hanteert voor dit huishouden*")
 
     # ----------------------------------------------------------------------------
@@ -1081,4 +1176,6 @@ try:
 except FileNotFoundError:
     st.error("Databestand 'dataoverzicht_dashboard_armoedebeleid.xlsx' niet gevonden.")
 except Exception as e:
-    st.error(f"Er is een fout opgetreden: {str(e)}")
+    import traceback
+    st.error(f"Er is een fout opgetreden: {type(e).__name__}: {str(e)}")
+    st.code(traceback.format_exc())
