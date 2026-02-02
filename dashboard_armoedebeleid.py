@@ -57,7 +57,13 @@ st.markdown("""
 def load_data(key):
     """Load all required data from Excel file and merge municipality information"""
     # Support both Streamlit secrets.toml and environment variables (for Cloud Run)
-    if "excel_url" in st.secrets:
+    # Use defensive check to avoid issues when secrets.toml doesn't exist
+    try:
+        has_secrets = hasattr(st, 'secrets') and len(st.secrets) > 0 and "excel_url" in st.secrets
+    except Exception:
+        has_secrets = False
+
+    if has_secrets:
         # Streamlit Cloud or local development
         excel_url = st.secrets["excel_url"]
         key_all = st.secrets["key_all"]
