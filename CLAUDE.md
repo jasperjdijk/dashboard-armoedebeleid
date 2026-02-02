@@ -81,3 +81,11 @@ Filter values stored in `st.session_state`:
 ## Language
 
 UI text is in Dutch. Error messages and user-facing strings should remain in Dutch.
+
+## Project Documentation
+
+Implementation plans and technical documentation should be stored in the `.claude/` folder:
+- Deployment plans: `.claude/google-cloud-deployment-plan.md`
+- Other technical plans and documentation as needed
+
+This keeps project-specific plans with the codebase rather than in user account folders.

@@ -13,6 +13,7 @@ Visualizations:
 
 """
 
+import os
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -55,17 +56,28 @@ st.markdown("""
 @st.cache_data
 def load_data(key):
     """Load all required data from Excel file and merge municipality information"""
-    # Get Excel URL from Streamlit secrets (keeps data private)
-    excel_url = st.secrets["excel_url"]
-    excel_file = pd.ExcelFile(excel_url)
+    # Support both Streamlit secrets.toml and environment variables (for Cloud Run)
+    if "excel_url" in st.secrets:
+        # Streamlit Cloud or local development
+        excel_url = st.secrets["excel_url"]
+        key_all = st.secrets["key_all"]
+        key_barneveld = st.secrets["key_barneveld"]
+        key_delft = st.secrets["key_delft"]
+    else:
+        # Google Cloud Run (environment variables)
+        excel_url = os.getenv("EXCEL_URL", "dataoverzicht_dashboard_armoedebeleid.xlsx")
+        key_all = os.getenv("KEY_ALL", "")
+        key_barneveld = os.getenv("KEY_BARNEVELD", "")
+        key_delft = os.getenv("KEY_DELFT", "")
 
+    excel_file = pd.ExcelFile(excel_url)
     df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
 
-    if key == st.secrets["key_all"]:
+    if key == key_all:
         return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '')]
-    elif key == st.secrets["key_delft"]:
+    elif key == key_delft:
         excluded_municipalities = ['Barneveld']
-    elif key == st.secrets["key_barneveld"]:
+    elif key == key_barneveld:
         excluded_municipalities = ['Delft']
     else:
         excluded_municipalities = ['Barneveld', 'Delft']

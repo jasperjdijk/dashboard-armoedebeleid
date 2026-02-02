@@ -1,0 +1,53 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.devcontainer/
+
+# Documentation and development files
+README.md
+CLAUDE.md
+DEPLOYMENT.md
+.claude/
+
+# Backup and old files
+oud/
+
+# Streamlit secrets (use environment variables in Cloud Run)
+.streamlit/secrets.toml
+
+# Data files (loaded from Dropbox at runtime)
+dataoverzicht_dashboard_armoedebeleid.xlsx
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+.pytest_cache/
+
+# GitHub workflows (if any)
+.github/
