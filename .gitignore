@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Streamlit secrets - NEVER commit this
+.streamlit/secrets.toml
+
+# Backup and old files
+oud/
+
+# Project-specific files to keep local only
+.claude/
+CLAUDE.md
+dataoverzicht_dashboard_armoedebeleid.xlsx
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
