@@ -82,6 +82,42 @@ Filter values stored in `st.session_state`:
 
 UI text is in Dutch. Error messages and user-facing strings should remain in Dutch.
 
+## Deployment
+
+### Google Cloud Run
+
+The dashboard is deployed to Google Cloud Run at:
+**https://dashboard-armoedebeleid-1097840068635.europe-west4.run.app**
+
+**To deploy updates:**
+
+```bash
+# 1. Commit changes to git
+git add .
+git commit -m "Your commit message
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+git push origin main
+
+# 2. Deploy to Cloud Run (builds and deploys from source)
+"C:/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd" run deploy dashboard-armoedebeleid \
+  --source . \
+  --region europe-west4 \
+  --allow-unauthenticated
+```
+
+**Notes:**
+- The `--source .` flag builds the Docker image from the Dockerfile in Cloud Build
+- Environment variables (EXCEL_URL, KEY_ALL, KEY_BARNEVELD, KEY_DELFT) are configured as secrets in Google Secret Manager
+- Deployment takes ~5-10 minutes for the build process
+- The service auto-scales from 0 to 10 instances based on traffic
+
+### CSV Export Feature
+
+CSV export buttons are hidden by default. Add `?export=1` to the URL to enable them:
+- Normal view: `https://dashboard-armoedebeleid-1097840068635.europe-west4.run.app`
+- With exports: `https://dashboard-armoedebeleid-1097840068635.europe-west4.run.app?export=1`
+
 ## Project Documentation
 
 Implementation plans and technical documentation should be stored in the `.claude/` folder:
