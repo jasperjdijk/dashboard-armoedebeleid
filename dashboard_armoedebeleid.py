@@ -1008,9 +1008,9 @@ try:
 
             # Format percentage for Inkomensgrens column
             def format_percentage(x):
-                if pd.notna(x) and x is not None:
+                if pd.notna(x) and x is not None and x > 0:
                     return f"{int(x * 100)}%"
-                return ""
+                return "? %"
 
             display_df['Waarde'] = display_df['Waarde'].apply(pad_currency)
             display_df['Inkomensgrens'] = display_df['Inkomensgrens'].apply(format_percentage)
