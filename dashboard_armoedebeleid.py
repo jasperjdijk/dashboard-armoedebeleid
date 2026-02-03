@@ -897,15 +897,13 @@ try:
             "Huishoudtypen",
             "Inkomensgroepen",
             "(In)formeel",
-            "Waarden en Inkomensgrenzen"
+            "Gemiddelde inkomensgrenzen"
         ])
 
     # ----------------------------------------------------------------------------
     # Graph 1: Box Plot - Value by Household Type
     # ----------------------------------------------------------------------------
     with tab1:
-        st.header("Waarde regelingen per huishouden", anchor=False)
-
         fig = create_household_figure(
             df,
             selected_income,
@@ -947,14 +945,24 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen waar de vier voorbeeldhuishoudens recht op hebben bij een inkomen van {selected_income_pct}% van het sociaal minimum*")
+        if selected_fr == 1:
+            formeel = "**formele**"
+        elif selected_fr == 2:
+            formeel = "**informele**"
+        elif selected_fr == 3:
+            formeel = ""
+
+        if selected_cav == 0:
+            gemeentepolis = "**buiten beschouwing** gelaten"
+        elif selected_cav == 1:
+            gemeentepolis = "**hierin meegenomen**"
+        
+        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waar een voorbeeldhuishouden recht op heeft dat **{selected_referteperiode} jaar** een inkomen heeft van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
 
     # ----------------------------------------------------------------------------
     # Graph 2: Income Progression
     # ----------------------------------------------------------------------------
     with tab2:
-        st.header("Waarde regelingen per inkomensgroep", anchor=False)
-
         fig_income = create_income_figure(
             df,
             selected_huishouden,
@@ -992,13 +1000,11 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"*De gecombineerde waarde (in € per maand) is een schatting o.b.v. alle regelingen voor een {household_labels[selected_huishouden].lower()} bij verschillende inkomensniveaus*")
+        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waar een **{household_labels[selected_huishouden].lower()}** recht op heeft met tenminste **{selected_referteperiode} jaar** een bepaald inkomensniveau. De korting op de gemeentepolis is {gemeentepolis}.")
     # ----------------------------------------------------------------------------
     # Graph 3: Formal vs Informal
     # ----------------------------------------------------------------------------
     with tab3:
-        st.header("Formele en informele waarden", anchor=False)
-
         fig_bar = create_formal_informal_figure(
             df,
             selected_huishouden,
@@ -1040,14 +1046,12 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"*Waarde formele en informele gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op {selected_income_pct}% van het sociaal minimum*")
+        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van de formele of informele gemeentelijke regelingen waar een **{household_labels[selected_huishouden].lower()}** recht op heeft met **{selected_referteperiode} jaar** een inkomen van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
 
     # ----------------------------------------------------------------------------
     # Graph 4: Population vs Income Threshold
     # ----------------------------------------------------------------------------
     with tab4:
-        st.header("Waarde en gemiddelde inkomensgrens", anchor=False)
-
         fig_threshold = create_threshold_figure(
             df,
             selected_huishouden,
@@ -1083,16 +1087,12 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"*Waarde gemeentelijke regelingen (in € per maand) voor een {household_labels[selected_huishouden].lower()} op 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen die de gemeente hanteert voor dit huishouden*")
+        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waar een **{household_labels[selected_huishouden].lower()}** recht op heeft met **{selected_referteperiode} jaar** een inkomen heeft van 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen. De korting op de gemeentepolis is {gemeentepolis}.")
 
     # ----------------------------------------------------------------------------
     # Regulations Table (shown on the right side)
     # ----------------------------------------------------------------------------
     with table_col:
-        # Add vertical spacing to align with graphs (account for tabs and header)
-        st.markdown("<div style='height: 65px;'></div>", unsafe_allow_html=True)
-        st.markdown(f"*Waarde (in € per maand) en inkomensgrens<br />voor alle regelingen in {gemeente_labels[selected_gemeente]}*", unsafe_allow_html=True)
-
         # Get table data with all regulations (matching and non-matching)
         display_df = regelingen_lijst(
             df, selected_gemeente, selected_huishouden,
@@ -1100,6 +1100,10 @@ try:
         )
 
         if not display_df.empty:
+            # Split into matching and non-matching regulations
+            matching_df = display_df[display_df['Matches'] == True].copy()
+            non_matching_df = display_df[display_df['Matches'] == False].copy()
+
             # Find the maximum value to determine padding width
             max_value = display_df['Waarde'].max() or 0
             # Calculate width needed for the largest number (without € sign)
@@ -1125,51 +1129,93 @@ try:
                     return f"{int(x * 100)}%"
                 return "? %"
 
-            display_df['Waarde'] = display_df['Waarde'].apply(pad_currency)
-            display_df['Inkomensgrens'] = display_df['Inkomensgrens'].apply(format_percentage)
-
-            # Style rows: gray out non-matching
-            def style_row(row):
-                if not row['Matches']:
-                    return ['color: #CCCCCC'] * len(row)
-                return [''] * len(row)
-
             # Style Waarde column: monospace font for alignment
             def style_waarde_column(s):
                 return ['font-family: monospace'] * len(s)
 
-            num_rows = len(display_df)
-            table_height = 38 + (num_rows * 35)  # No max limit, let table fit completely
+            # =================================================================
+            # Table 1: Matching Regulations
+            # =================================================================
+            if not matching_df.empty:
+                st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
 
-            # Rename columns for display
-            display_df = display_df.rename(columns={
-                'Regeling': 'Regelingen',
-                'Inkomensgrens': 'Grens'
-            })
+                # Format the dataframe
+                formatted_matching = matching_df.copy()
+                formatted_matching['Waarde'] = formatted_matching['Waarde'].apply(pad_currency)
+                formatted_matching['Inkomensgrens'] = formatted_matching['Inkomensgrens'].apply(format_percentage)
 
-            styled_df = display_df[['Regelingen', 'Waarde', 'Grens', 'Matches']].style.apply(style_row, axis=1)
-            styled_df = styled_df.apply(style_waarde_column, subset=['Waarde'])
+                # Rename columns for display
+                formatted_matching = formatted_matching.rename(columns={
+                    'Regeling': 'Regelingen',
+                    'Inkomensgrens': 'Grens'
+                })[['Regelingen', 'Waarde', 'Grens']]
 
-            st.dataframe(
-                styled_df,
-                hide_index=True,
-                height=table_height,
-                column_config={
-                    "Regelingen": st.column_config.TextColumn(
-                        "Regelingen",
-                        width=200
-                    ),
-                    "Waarde": st.column_config.TextColumn(
-                        "Waarde",
-                        width=75
-                    ),
-                    "Grens": st.column_config.TextColumn(
-                        "Grens",
-                        width=50
-                    ),
-                    "Matches": None
-                }
-            )
+                # Apply monospace font to Waarde column
+                styled_matching = formatted_matching.style.apply(
+                    style_waarde_column,
+                    subset=['Waarde']
+                )
+
+                # Calculate height
+                num_matching_rows = len(formatted_matching)
+                matching_table_height = 38 + (num_matching_rows * 35)
+
+                # Display table
+                st.dataframe(
+                    styled_matching,
+                    width='stretch',
+                    hide_index=True,
+                    height=matching_table_height,
+                    column_config={
+                        "Regelingen": st.column_config.TextColumn("Regelingen", width=200),
+                        "Waarde": st.column_config.TextColumn("Waarde", width=75),
+                        "Grens": st.column_config.TextColumn("Grens", width=50)
+                    }
+                )
+            else:
+                st.info("Geen passende regelingen gevonden.")
+
+            # Add spacing between tables
+            st.markdown(f"Bovenstaande {formeel} regelingen voor een **{household_labels[selected_huishouden].lower()}** in **{gemeente_labels[selected_gemeente]}** met al **{selected_referteperiode} jaar** een inkomen van **{selected_income_pct}%** van het sociaal minimum tellen op tot **€ 300** per maand. De korting op de gemeentepolis is {gemeentepolis}.<br /> De gemeente kent ook nog de onderstaande regelingen, die mogelijk niet van toepassing zijn of waarvan de waarde niet goed te bepalen was.", unsafe_allow_html=True)
+            
+            # =================================================================
+            # Table 2: Non-Matching Regulations
+            # =================================================================
+            if not non_matching_df.empty:
+                # Format the dataframe
+                formatted_non_matching = non_matching_df.copy()
+                formatted_non_matching['Waarde'] = formatted_non_matching['Waarde'].apply(pad_currency)
+                formatted_non_matching['Inkomensgrens'] = formatted_non_matching['Inkomensgrens'].apply(format_percentage)
+
+                # Rename columns for display
+                formatted_non_matching = formatted_non_matching.rename(columns={
+                    'Regeling': 'Regelingen',
+                    'Inkomensgrens': 'Grens'
+                })[['Regelingen', 'Waarde', 'Grens']]
+
+                # Apply monospace font to Waarde column AND gray color to all text
+                styled_non_matching = formatted_non_matching.style\
+                    .apply(style_waarde_column, subset=['Waarde'])\
+                    .apply(lambda x: ['color: #CCCCCC'] * len(x), axis=1)
+
+                # Calculate height
+                num_non_matching_rows = len(formatted_non_matching)
+                non_matching_table_height = 38 + (num_non_matching_rows * 35)
+
+                # Display table
+                st.dataframe(
+                    styled_non_matching,
+                    width='stretch',
+                    hide_index=True,
+                    height=non_matching_table_height,
+                    column_config={
+                        "Regelingen": st.column_config.TextColumn("Regelingen", width=200),
+                        "Waarde": st.column_config.TextColumn("Waarde", width=75),
+                        "Grens": st.column_config.TextColumn("Grens", width=50)
+                    }
+                )
+            else:
+                st.info("Geen overige regelingen gevonden.")
         else:
             st.info(f"Geen regelingen gevonden voor {gemeente_labels[selected_gemeente]}")
 
