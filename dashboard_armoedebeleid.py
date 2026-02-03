@@ -679,7 +679,7 @@ def create_threshold_figure(_df, selected_huishouden, selected_referteperiode, s
         selected_threshold_data = selected_threshold_data.copy()
         selected_threshold_data['hover_text'] = (
             "<b>" + selected_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
-            household_labels[selected_huishouden] + "<br>Inkomensgrens: " +
+            household_labels[selected_huishouden] + "<br>Gemiddelde inkomensgrens: " +
             (selected_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
             "Waarde bij 100% sociaal minimum: € " +
             selected_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
@@ -777,13 +777,14 @@ try:
         st.header("Filters", anchor=False)
 
         selected_income_pct = st.slider(
-            "Inkomen:",
+            "Inkomen",
             min_value=100,
             max_value=200,
             value=default_income,
             step=1,
             format="%d%%",
-            key="income"
+            key="income",
+            help="Als percentage van het sociale minimum (bijstandsniveau)"
         )
         selected_income = selected_income_pct / 100
 
@@ -792,11 +793,12 @@ try:
             default_gemeente = list(gemeente_labels.keys())[0]
 
         selected_gemeente = st.selectbox(
-            "Gemeente:",
+            "Gemeente",
             options=gemeente_labels.keys(),
             format_func=lambda x: gemeente_labels[x],
             index=list(gemeente_labels.keys()).index(default_gemeente),
-            key="gemeente"
+            key="gemeente",
+            help="Welke gemeente moet worden uitgelicht in het dashboard?"
         )
 
         # Ensure default huishouden is valid
@@ -808,7 +810,8 @@ try:
             options=list(household_labels.keys()),
             format_func=lambda x: household_labels[x],
             index=list(household_labels.keys()).index(default_huishouden),
-            key="huishouden"
+            key="huishouden",
+            help="Welk huishoudtype wilt u meer over weten?"
         )
 
         selected_referteperiode = st.segmented_control(
@@ -858,7 +861,7 @@ try:
         )
 
         default_cav = params.get("cav", "0") == "1"
-        toggle_cav = st.toggle("Korting gemeentepolis", value=default_cav, key="toggle_cav")
+        toggle_cav = st.toggle("Korting gemeentepolis", value=default_cav, key="toggle_cav", help="Moet de korting op een eventuele geemeentepolis worden meegenomen op het totaalbedrag? (Deze polis is niet voor ieder huishouden voordelig)")
 
         # Legend
         st.markdown("**Legenda**")
@@ -956,8 +959,13 @@ try:
             gemeentepolis = "**buiten beschouwing** gelaten"
         elif selected_cav == 1:
             gemeentepolis = "**hierin meegenomen**"
+
+        if selected_referteperiode == 0:
+            reftext = "sinds kort"
+        else:
+            reftext = f"al {selected_referteperiode} jaar"
         
-        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waar een voorbeeldhuishouden recht op heeft dat **{selected_referteperiode} jaar** een inkomen heeft van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
+        st.markdown(f"Schatting van de totale waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waarop een voorbeeldhuishouden recht heeft, dat **{reftext}** een inkomen heeft van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
 
     # ----------------------------------------------------------------------------
     # Graph 2: Income Progression
@@ -1000,7 +1008,7 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waar een **{household_labels[selected_huishouden].lower()}** recht op heeft met tenminste **{selected_referteperiode} jaar** een bepaald inkomensniveau. De korting op de gemeentepolis is {gemeentepolis}.")
+        st.markdown(f"Schatting van de totale waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waarop een **{household_labels[selected_huishouden].lower()}** recht heeft, met **{reftext}** een bepaald inkomensniveau. De korting op de gemeentepolis is {gemeentepolis}.")
     # ----------------------------------------------------------------------------
     # Graph 3: Formal vs Informal
     # ----------------------------------------------------------------------------
@@ -1046,8 +1054,7 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van de formele of informele gemeentelijke regelingen waar een **{household_labels[selected_huishouden].lower()}** recht op heeft met **{selected_referteperiode} jaar** een inkomen van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
-
+        st.markdown(f"Schatting van de totale waarde (in € per maand) van zowel de formele als informele gemeentelijke regelingen waarop een **{household_labels[selected_huishouden].lower()}** recht heeft, met **{reftext}** een inkomen van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
     # ----------------------------------------------------------------------------
     # Graph 4: Population vs Income Threshold
     # ----------------------------------------------------------------------------
@@ -1087,8 +1094,7 @@ try:
                 mime="text/csv"
             )
 
-        st.markdown(f"Schatting van de gecombineerde waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waar een **{household_labels[selected_huishouden].lower()}** recht op heeft met **{selected_referteperiode} jaar** een inkomen heeft van 100% van het sociaal minimum en het gewogen gemiddelde van alle inkomensgrenzen. De korting op de gemeentepolis is {gemeentepolis}.")
-
+        st.markdown(f"Schatting van de totale waarde (in € per maand) en de gemiddelde inkomensgrens van **alle** {formeel} gemeentelijke regelingen waarop een **{household_labels[selected_huishouden].lower()}** recht heeft, met **{reftext}** een inkomen van 100% van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
     # ----------------------------------------------------------------------------
     # Regulations Table (shown on the right side)
     # ----------------------------------------------------------------------------
@@ -1175,8 +1181,12 @@ try:
             else:
                 st.info("Geen passende regelingen gevonden.")
 
-            # Add spacing between tables
-            st.markdown(f"Bovenstaande {formeel} regelingen voor een **{household_labels[selected_huishouden].lower()}** in **{gemeente_labels[selected_gemeente]}** met al **{selected_referteperiode} jaar** een inkomen van **{selected_income_pct}%** van het sociaal minimum tellen op tot **€ 300** per maand. De korting op de gemeentepolis is {gemeentepolis}.<br /> De gemeente kent ook nog de onderstaande regelingen, die mogelijk niet van toepassing zijn of waarvan de waarde niet goed te bepalen was.", unsafe_allow_html=True)
+            # Calculate total value of matching regulations
+            total_waarde = matching_df['Waarde'].sum() if not matching_df.empty else 0
+            total_waarde_formatted = format_dutch_currency(total_waarde, decimals=0)
+
+            st.markdown(f"Bovenstaande {formeel} regelingen voor een **{household_labels[selected_huishouden].lower()}** in **{gemeente_labels[selected_gemeente]}** met **{reftext}** een inkomen van **{selected_income_pct}%** van het sociaal minimum tellen op tot **{total_waarde_formatted}** per maand.", unsafe_allow_html=True)
+            st.markdown("De gemeente kent ook nog de onderstaande regelingen, die mogelijk niet van toepassing zijn of waarvan de waarde niet goed te bepalen was.")
             
             # =================================================================
             # Table 2: Non-Matching Regulations

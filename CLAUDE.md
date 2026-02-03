@@ -94,9 +94,7 @@ The dashboard is deployed to Google Cloud Run at:
 ```bash
 # 1. Commit changes to git
 git add .
-git commit -m "Your commit message
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+git commit -m "Your commit message"
 git push origin main
 
 # 2. Deploy to Cloud Run (builds and deploys from source)
