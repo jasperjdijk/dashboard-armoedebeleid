@@ -9,35 +9,7 @@ gatherUsageStats = false
 family = "DMSans"  # Main body font - clean, modern sans-serif
 url = "fonts/DMSans-VariableFont_opsz,wght.ttf"
 
-[[theme.fontFaces]]
-family = "DMMono"  # Code font - monospace for readability
-url = "fonts/DMMono-Medium.ttf"
-style = "normal"
-weight = 500
-
-[[theme.fontFaces]]
-family = "DMMono"
-url = "fonts/DMMono-MediumItalic.ttf"
-style = "italic"
-weight = 500
-
-[[theme.fontFaces]]
-family = "DMMono"
-url = "fonts/DMMono-Italic.ttf"
-style = "italic"
-weight = 400
-
-[[theme.fontFaces]]
-family = "DMMono"
-url = "fonts/DMMono-Regular.ttf"
-style = "normal"
-weight = 400
-
-
 [theme]
-# Base theme ("light" or "dark")
-base = "light"
-
 # Main colors
 primaryColor                = "#d63f44" # Accent color for interactive elements (default: "#FF4B4B")
 secondaryBackgroundColor    = "#f4ede3" # Sidebar and secondary areas (default: "#F0F2F6")
@@ -46,7 +18,6 @@ borderColor                 = "#E68C8F" # Gentle borders that define
 
 # Choose fonts
 font                = "DMSans"  # Apply your custom font to body text
-codeFont            = "DMMono"  # Monospace for code blocks
 headingFontWeights  = [600,500,500,500,500,500]
 headingFontSizes    = ["2rem", "1rem"]
 
