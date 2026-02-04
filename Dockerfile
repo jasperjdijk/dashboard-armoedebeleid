@@ -20,13 +20,12 @@ RUN python -m compileall /usr/local/lib/python3.11
 # Copy application code
 COPY dashboard_armoedebeleid.py .
 
-# Copy static assets (favicon and logo)
+# Copy static assets (favicon)
 COPY Favicon-alt-2.png .
-COPY ["IPE Logo 01.png", "."]
 
-# Copy Streamlit configuration and fonts
+# Copy Streamlit configuration and static files (fonts)
 COPY .streamlit/config.toml .streamlit/
-COPY fonts/ fonts/
+COPY static/ static/
 
 # Pre-compile dashboard bytecode for faster startup
 RUN python -m py_compile dashboard_armoedebeleid.py
