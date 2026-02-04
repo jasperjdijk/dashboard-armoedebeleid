@@ -119,9 +119,8 @@ def load_data(key):
     return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '') & ~df['Gemeentenaam'].isin(excluded_municipalities)]
 
 
-@st.cache_data
 def get_alle_gemeenten(_df, key):
-    """Get all unique municipality codes from the dataframe (cached)."""
+    """Get all unique municipality codes from the dataframe."""
     return _df['GMcode'].unique()
 
 
@@ -180,7 +179,6 @@ def filter_regelingen(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
 # ================================================================================
 # CACHED DATA FUNCTIONS FOR GRAPHS AND TABLE
 # ================================================================================
-@st.cache_data
 def regelingen_lijst(_df, gmcode, hh, ink, refper, cav, fr, key=None):
     """Get table data for all regulations, with matching status. Sorted: matching by value, non-matching alphabetically."""
     wrd_col, ig_col = f'WRD_{hh}', f'IG_{hh}'
@@ -204,7 +202,6 @@ def regelingen_lijst(_df, gmcode, hh, ink, refper, cav, fr, key=None):
     ])
 
 
-@st.cache_data
 def get_household_data(_df, ink, refper, cav, fr, key=None):
     """Calculate values for all municipalities and all household types (Graph 1)."""
     alle_gemeenten = get_alle_gemeenten(_df, key)
@@ -221,7 +218,6 @@ def get_household_data(_df, ink, refper, cav, fr, key=None):
 
     return pd.concat(results, ignore_index=True)
 
-@st.cache_data
 def get_income_progression_data(_df, hh, ink, refper, cav, fr, key=None):
     """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
     # Calculate income levels to show based on selected income
@@ -258,7 +254,6 @@ def get_income_line_data(_df, gmcode, hh, refper, cav, fr, key=None):
 
     return pd.DataFrame(results)
 
-@st.cache_data
 def get_formal_informal_data(_df, hh, ink, refper, cav, key=None):
     """Calculate formal and informal values for all municipalities (Graph 3)."""
     gemeente_codes = get_alle_gemeenten(_df, key)
@@ -292,7 +287,6 @@ def get_formal_informal_data(_df, hh, ink, refper, cav, key=None):
     grouped['Totaal'] = grouped['Formeel'] + grouped['Informeel']
     return grouped
 
-@st.cache_data
 def get_threshold_data(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, key=None):
     """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
     gemeente_codes = get_alle_gemeenten(_df, key)
@@ -343,7 +337,6 @@ def get_threshold_data(_df, selected_huishouden, selected_referteperiode, select
 # CACHED FIGURE FUNCTIONS
 # ================================================================================
 
-@st.cache_data
 def create_household_figure(_df, selected_income, selected_income_pct, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
     """Create box plot figure for household comparison (Graph 1)."""
     # Get data
@@ -460,7 +453,6 @@ def create_household_figure(_df, selected_income, selected_income_pct, selected_
 
     return fig
 
-@st.cache_data
 def create_income_figure(_df, selected_huishouden, selected_income_pct, selected_income, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
     """Create line chart figure for income progression (Graph 2)."""
     fig_income = go.Figure()
@@ -588,7 +580,6 @@ def create_income_figure(_df, selected_huishouden, selected_income_pct, selected
 
     return fig_income
 
-@st.cache_data
 def create_formal_informal_figure(_df, selected_huishouden, selected_income, selected_income_pct, selected_referteperiode, selected_cav, selected_gemeente, gemeente_labels, household_labels, key=None):
     """Create stacked bar chart for formal vs informal regulations (Graph 3)."""
     # Get cached formal/informal data
@@ -663,7 +654,6 @@ def create_formal_informal_figure(_df, selected_huishouden, selected_income, sel
 
     return fig_bar
 
-@st.cache_data
 def create_threshold_figure(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
     """Create scatter plot for value vs income threshold (Graph 4)."""
     # Get cached threshold data
@@ -793,9 +783,13 @@ try:
     # ----------------------------------------------------------------------------
     st.title("Dashboard armoedebeleid", anchor=False)
 
-    # Prepare gemeente labels before tabs
-    gemeenten_df = df[['GMcode', 'Gemeentenaam']].dropna().drop_duplicates().sort_values('Gemeentenaam')
-    gemeente_labels = {str(row['GMcode']): str(row['Gemeentenaam']) for _, row in gemeenten_df.iterrows()}
+    # Prepare gemeente labels before tabs (more efficient with set_index)
+    gemeente_labels = (df[['GMcode', 'Gemeentenaam']]
+                       .dropna()
+                       .drop_duplicates()
+                       .astype(str)
+                       .set_index('GMcode')['Gemeentenaam']
+                       .to_dict())
 
     # ----------------------------------------------------------------------------
     # Selectors (in sidebar) - synced with URL query parameters
@@ -869,21 +863,9 @@ try:
         else:
             default_reg_types = ["Formeel", "Informeel"]
 
-        # Initialize session state if it doesn't exist
+        # Initialize session state if it doesn't exist - no rerun needed
         if "reg_types" not in st.session_state:
-            st.session_state.reg_types = default_reg_types
-
-        # Handle auto-toggle logic: if session state is empty, toggle to the other option
-        current_value = st.session_state.reg_types
-        if not current_value or len(current_value) == 0:
-            # Toggle based on previous value
-            if default_fr == 1:
-                st.session_state.reg_types = ["Informeel"]
-            elif default_fr == 2:
-                st.session_state.reg_types = ["Formeel"]
-            else:
-                st.session_state.reg_types = ["Formeel"]
-            st.rerun()
+            st.session_state.reg_types = default_reg_types if default_reg_types else ["Formeel", "Informeel"]
 
         # Regulation type values: Formeel=1, Informeel=2, both=3
         reg_type_values = {"Formeel": 1, "Informeel": 2}
@@ -914,6 +896,7 @@ try:
         """, unsafe_allow_html=True)
 
     # Update URL with current selections (preserving the key parameter)
+    # Only update if params actually changed to prevent unnecessary reruns
     new_params = {"key": params.get("key", "")} if params.get("key") else {}
     new_params["ink"] = str(selected_income_pct)
     new_params["gm"] = selected_gemeente
@@ -924,7 +907,9 @@ try:
     selected_cav = 1 if toggle_cav else 0
     new_params["reg"] = str(selected_fr)
     new_params["cav"] = str(selected_cav)
-    st.query_params.update(new_params)
+    # Only update query params if they changed
+    if dict(st.query_params) != new_params:
+        st.query_params.update(new_params)
 
     # Create two-column layout: graphs on left, table on right
     graph_col, table_col = st.columns([2, 1])
