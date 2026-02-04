@@ -1,10 +1,66 @@
 [server]
-enableCORS = false
-enableXsrfProtection = false
-runOnSave = true
+enableStaticServing = true  # This lets Streamlit serve your custom fonts
 
 [browser]
 gatherUsageStats = false
 
+# Define your custom font families
+[[theme.fontFaces]]
+family = "DMSans"  # Main body font - clean, modern sans-serif
+url = "fonts/DMSans-VariableFont_opsz,wght.ttf"
+
+[[theme.fontFaces]]
+family = "DMMono"  # Code font - monospace for readability
+url = "fonts/DMMono-Medium.ttf"
+style = "normal"
+weight = 500
+
+[[theme.fontFaces]]
+family = "DMMono"
+url = "fonts/DMMono-MediumItalic.ttf"
+style = "italic"
+weight = 500
+
+[[theme.fontFaces]]
+family = "DMMono"
+url = "fonts/DMMono-Italic.ttf"
+style = "italic"
+weight = 400
+
+[[theme.fontFaces]]
+family = "DMMono"
+url = "fonts/DMMono-Regular.ttf"
+style = "normal"
+weight = 400
+
+
 [theme]
-secondaryBackgroundColor = "#f4ede3"
+# Base theme ("light" or "dark")
+base = "light"
+
+# Main colors
+primaryColor                = "#d63f44" # Accent color for interactive elements (default: "#FF4B4B")
+secondaryBackgroundColor    = "#f4ede3" # Sidebar and secondary areas (default: "#F0F2F6")
+textColor                   = "#000000" # Main text color (default: "#262730")
+borderColor                 = "#E68C8F" # Gentle borders that define
+
+# Choose fonts
+font                = "DMSans"  # Apply your custom font to body text
+codeFont            = "DMMono"  # Monospace for code blocks
+headingFontWeights  = [600,500,500,500,500,500]
+headingFontSizes    = ["2rem", "1rem"]
+
+# Other settings
+baseRadius = "0.6rem"             # Subtle rounded corners - modern feel
+
+# Chart colors (use JSON array format with square brackets)
+# Colors used throughout the dashboard (excluding primaryColor which is defined above):
+# [0] #9f9f9f - Other/unselected municipalities
+# [1] #E68C8F - Selected informal regulations
+# [2] #C5C5C5 - Other informal regulations
+chartCategoricalColors = ["#9f9f9f", "#E68C8F", "#C5C5C5"]
+chartSequentialColors = ["#D63F44", "#F7D9DA", "#E68C8F", "#72181B", "#EFB2B4", "#1D3354", "#C4D3EB", "#4E7CC2", "#0E192A", "#89A8D6"]
+
+# Dataframe styling
+dataframeBorderColor            = "#ffffff" # Dataframe border color (default: "#E6E9EF")
+dataframeHeaderBackgroundColor  = "#f4ede3" # Dataframe header background (default: "#F0F2F6")

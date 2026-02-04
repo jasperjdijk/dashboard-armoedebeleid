@@ -50,6 +50,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================================================================================
+# COLOR CONFIGURATION
+# ================================================================================
+# Read colors from Streamlit theme config
+COLOR_SELECTED = st.get_option("theme.primaryColor")  # Selected municipality/highlight
+CHART_COLORS = st.get_option("theme.chartCategoricalColors")  # All other colors
+
+# Assign semantic names to colors from chartCategoricalColors array
+COLOR_OTHER = CHART_COLORS[0]              # #9f9f9f - Other/unselected municipalities
+COLOR_INFORMAL_SELECTED = CHART_COLORS[1]  # #E68C8F - Selected informal regulations
+COLOR_INFORMAL_OTHER = CHART_COLORS[2]     # #C5C5C5 - Other informal regulations
+
+# ================================================================================
 # HELPER FUNCTIONS
 # ================================================================================
 
@@ -340,7 +352,7 @@ def create_household_figure(_df, selected_income, selected_income_pct, selected_
                 pointpos=0,
                 marker=dict(
                     size=8,
-                    color='#9f9f9f',
+                    color=COLOR_OTHER,
                     opacity=0.6
                 ),
                 hovertext=hover_text_other,
@@ -368,7 +380,7 @@ def create_household_figure(_df, selected_income, selected_income_pct, selected_
                 pointpos=0,
                 marker=dict(
                     size=10,
-                    color='#d63f44',
+                    color=COLOR_SELECTED,
                 ),
                 hovertext=hover_text_selected,
                 hoverinfo='text',
@@ -462,7 +474,7 @@ def create_income_figure(_df, selected_huishouden, selected_income_pct, selected
             name='Overige gemeenten',
             marker=dict(
                 size=8,
-                color='#9f9f9f',
+                color=COLOR_OTHER,
                 opacity=0.6
             ),
             hovertext=other_marker_data['hover_text'],
@@ -483,7 +495,7 @@ def create_income_figure(_df, selected_huishouden, selected_income_pct, selected
         mode='lines',
         name=selected_gemeente_name,
         line=dict(
-            color='#d63f44',
+            color=COLOR_SELECTED,
             width=2
         ),
         hoverinfo='skip',
@@ -504,7 +516,7 @@ def create_income_figure(_df, selected_huishouden, selected_income_pct, selected
         name=selected_gemeente_name,
         marker=dict(
             size=10,
-            color='#d63f44'
+            color=COLOR_SELECTED
         ),
         hovertext=selected_marker_data['hover_text'],
         hoverinfo='text',
@@ -566,8 +578,8 @@ def create_formal_informal_figure(_df, selected_huishouden, selected_income, sel
 
     # Vectorized color and hover text generation
     is_selected = bar_data['Gemeente'] == selected_gemeente
-    colors_formal = is_selected.map({True: '#d63f44', False: '#9f9f9f'}).tolist()
-    colors_informal = is_selected.map({True: '#E68C8F', False: '#C5C5C5'}).tolist()
+    colors_formal = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER}).tolist()
+    colors_informal = is_selected.map({True: COLOR_INFORMAL_SELECTED, False: COLOR_INFORMAL_OTHER}).tolist()
 
     hover_prefix = f"{household_labels[selected_huishouden]}<br>{selected_income_pct}% sociaal minimum<br>"
     hover_formal = (
@@ -664,7 +676,7 @@ def create_threshold_figure(_df, selected_huishouden, selected_referteperiode, s
             mode='markers',
             marker=dict(
                 size=other_threshold_data['Inwoners'] / 10000,
-                color='#9f9f9f',
+                color=COLOR_OTHER,
                 opacity=0.6,
                 sizemode='diameter'
             ),
@@ -692,7 +704,7 @@ def create_threshold_figure(_df, selected_huishouden, selected_referteperiode, s
             mode='markers',
             marker=dict(
                 size=selected_threshold_data['Inwoners'] / 10000,
-                color='#d63f44',
+                color=COLOR_SELECTED,
                 sizemode='diameter'
             ),
             hovertext=selected_threshold_data['hover_text'],
@@ -756,7 +768,7 @@ try:
     # ----------------------------------------------------------------------------
     # Header and Gemeente Labels Preparation
     # ----------------------------------------------------------------------------
-    st.title("Dashboard armoedebeleid", anchor=False, text_alignment="center")
+    st.title("Dashboard armoedebeleid", anchor=False)
 
     # Prepare gemeente labels before tabs
     gemeenten_df = df[['GMcode', 'Gemeentenaam']].dropna().drop_duplicates().sort_values('Gemeentenaam')
@@ -868,11 +880,11 @@ try:
         st.markdown(f"""
         <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #EF553B;"></div>
+                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: {COLOR_SELECTED};"></div>
                 <span>{gemeente_labels[selected_gemeente]}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #B0B0B0;"></div>
+                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: {COLOR_OTHER};"></div>
                 <span>Overige gemeenten</span>
             </div>
         </div>
@@ -1135,10 +1147,6 @@ try:
                     return f"{int(x * 100)}%"
                 return "? %"
 
-            # Style Waarde column: monospace font for alignment
-            def style_waarde_column(s):
-                return ['font-family: monospace'] * len(s)
-
             # =================================================================
             # Table 1: Matching Regulations
             # =================================================================
@@ -1150,32 +1158,18 @@ try:
                 formatted_matching['Waarde'] = formatted_matching['Waarde'].apply(pad_currency)
                 formatted_matching['Inkomensgrens'] = formatted_matching['Inkomensgrens'].apply(format_percentage)
 
-                # Rename columns for display
-                formatted_matching = formatted_matching.rename(columns={
-                    'Regeling': 'Regelingen',
-                    'Inkomensgrens': 'Grens'
-                })[['Regelingen', 'Waarde', 'Grens']]
-
-                # Apply monospace font to Waarde column
-                styled_matching = formatted_matching.style.apply(
-                    style_waarde_column,
-                    subset=['Waarde']
-                )
-
-                # Calculate height
-                num_matching_rows = len(formatted_matching)
-                matching_table_height = 38 + (num_matching_rows * 35)
+                # Select columns for display
+                formatted_matching = formatted_matching[['Regeling', 'Waarde', 'Inkomensgrens']]
 
                 # Display table
                 st.dataframe(
-                    styled_matching,
-                    width='stretch',
+                    formatted_matching,
+                    width="stretch",
                     hide_index=True,
-                    height=matching_table_height,
                     column_config={
-                        "Regelingen": st.column_config.TextColumn("Regelingen", width=200),
-                        "Waarde": st.column_config.TextColumn("Waarde", width=75),
-                        "Grens": st.column_config.TextColumn("Grens", width=50)
+                        "Regeling": st.column_config.TextColumn("Regelingen", width=210),
+                        "Waarde": st.column_config.TextColumn("Waarde", width=40),
+                        "Inkomensgrens": st.column_config.TextColumn("Grens", width=30)
                     }
                 )
             else:
@@ -1197,31 +1191,22 @@ try:
                 formatted_non_matching['Waarde'] = formatted_non_matching['Waarde'].apply(pad_currency)
                 formatted_non_matching['Inkomensgrens'] = formatted_non_matching['Inkomensgrens'].apply(format_percentage)
 
-                # Rename columns for display
-                formatted_non_matching = formatted_non_matching.rename(columns={
-                    'Regeling': 'Regelingen',
-                    'Inkomensgrens': 'Grens'
-                })[['Regelingen', 'Waarde', 'Grens']]
+                # Select columns for display
+                formatted_non_matching = formatted_non_matching[['Regeling', 'Waarde', 'Inkomensgrens']]
 
-                # Apply monospace font to Waarde column AND gray color to all text
+                # Apply gray color to all text
                 styled_non_matching = formatted_non_matching.style\
-                    .apply(style_waarde_column, subset=['Waarde'])\
-                    .apply(lambda x: ['color: #CCCCCC'] * len(x), axis=1)
-
-                # Calculate height
-                num_non_matching_rows = len(formatted_non_matching)
-                non_matching_table_height = 38 + (num_non_matching_rows * 35)
+                    .apply(lambda x: [f'color: {COLOR_OTHER}'] * len(x), axis=1)
 
                 # Display table
                 st.dataframe(
                     styled_non_matching,
-                    width='stretch',
+                    width="stretch",
                     hide_index=True,
-                    height=non_matching_table_height,
                     column_config={
-                        "Regelingen": st.column_config.TextColumn("Regelingen", width=200),
-                        "Waarde": st.column_config.TextColumn("Waarde", width=75),
-                        "Grens": st.column_config.TextColumn("Grens", width=50)
+                        "Regeling": st.column_config.TextColumn("Regelingen", width=210),
+                        "Waarde": st.column_config.TextColumn("Waarde", width=40),
+                        "Inkomensgrens": st.column_config.TextColumn("Grens", width=30)
                     }
                 )
             else:
