@@ -7,7 +7,7 @@ gatherUsageStats = false
 # Define your custom font families
 [[theme.fontFaces]]
 family = "DM Sans"  # Main body font - clean, modern sans-serif
-url = "/fonts/DMSans-VariableFont_opsz,wght.ttf"
+url = "/static/fonts/DMSans-VariableFont_opsz,wght.ttf"
 weight = "100 900"
 style = "normal"
 
