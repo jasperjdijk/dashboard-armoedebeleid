@@ -15,6 +15,7 @@ oud/
 .claude/
 CLAUDE.md
 dataoverzicht_dashboard_armoedebeleid.xlsx
+*.parquet
 
 # Virtual environment
 venv/

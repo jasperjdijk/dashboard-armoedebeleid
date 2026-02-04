@@ -6,10 +6,13 @@ gatherUsageStats = false
 
 # Define your custom font families
 [[theme.fontFaces]]
-family = "DMSans"  # Main body font - clean, modern sans-serif
-url = "fonts/DMSans-VariableFont_opsz,wght.ttf"
+family = "DM Sans"  # Main body font - clean, modern sans-serif
+url = "/fonts/DMSans-VariableFont_opsz,wght.ttf"
+weight = "100 900"
+style = "normal"
 
 [theme]
+base = "light"
 # Main colors
 primaryColor                = "#d63f44" # Accent color for interactive elements (default: "#FF4B4B")
 secondaryBackgroundColor    = "#f4ede3" # Sidebar and secondary areas (default: "#F0F2F6")
@@ -17,7 +20,7 @@ textColor                   = "#000000" # Main text color (default: "#262730")
 borderColor                 = "#E68C8F" # Gentle borders that define
 
 # Choose fonts
-font                = "DMSans"  # Apply your custom font to body text
+font                = "DM Sans"  # Apply your custom font to body text
 headingFontWeights  = [600,500,500,500,500,500]
 headingFontSizes    = ["2rem", "1rem"]
 

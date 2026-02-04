@@ -49,6 +49,28 @@ Filter columns:
 - `CAV` - Health insurance discount flag
 - `WB`, `BT` - Inclusion flags
 
+### Data Format Optimization
+
+The dashboard supports both Excel (.xlsx) and Parquet (.parquet) formats. **Parquet is strongly recommended for production** as it loads 5-10x faster than Excel, significantly improving cold start times on Cloud Run.
+
+**Convert Excel to Parquet:**
+```bash
+python convert_to_parquet.py
+```
+
+This creates `dataoverzicht_dashboard_armoedebeleid.parquet` containing only the required columns and sheet.
+
+**Using Parquet in Cloud Run:**
+1. Upload the `.parquet` file to your data source
+2. Update the `EXCEL_URL` environment variable to point to the `.parquet` file
+3. The dashboard automatically detects the file format and uses the appropriate loader
+
+**Benefits:**
+- 5-10x faster loading
+- Smaller file size
+- Better cold start performance
+- Only required columns are loaded
+
 ### Household Types
 
 - `HH01` - Alleenstaande (Single person)

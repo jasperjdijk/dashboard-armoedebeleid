@@ -29,6 +29,7 @@ README.md
 CLAUDE.md
 DEPLOYMENT.md
 .claude/
+convert_to_parquet.py
 
 # Backup and old files
 oud/
@@ -38,6 +39,7 @@ oud/
 
 # Data files (loaded from Dropbox at runtime)
 dataoverzicht_dashboard_armoedebeleid.xlsx
+*.parquet
 
 # OS files
 .DS_Store

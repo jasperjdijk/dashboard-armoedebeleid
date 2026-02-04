@@ -1,0 +1,57 @@
+# Ignore git files
+.git/
+.gitignore
+.dockerignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE and development files
+.vscode/
+.idea/
+.devcontainer/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+cloud_run_logs.txt
+nul
+
+# Data files (loaded from Dropbox at runtime)
+*.xlsx
+*.xls
+*.csv
+*.parquet
+
+# Documentation (not needed in production)
+README.md
+CLAUDE.md
+.claude/
+convert_to_parquet.py
+
+# Backup and old files
+oud/
+*_backup.py
+*_backup*.py
+
+# Secrets (CRITICAL - never deploy!)
+.streamlit/secrets.toml
+
+# Local development
+.env
+.env.local

@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-compile Python bytecode for faster startup
+RUN python -m compileall /usr/local/lib/python3.11
+
 # Copy application code
 COPY dashboard_armoedebeleid.py .
 
@@ -21,8 +24,12 @@ COPY dashboard_armoedebeleid.py .
 COPY Favicon-alt-2.png .
 COPY ["IPE Logo 01.png", "."]
 
-# Copy Streamlit configuration
+# Copy Streamlit configuration and fonts
 COPY .streamlit/config.toml .streamlit/
+COPY fonts/ fonts/
+
+# Pre-compile dashboard bytecode for faster startup
+RUN python -m py_compile dashboard_armoedebeleid.py
 
 # Note: Excel file loaded from Dropbox URL at runtime (not bundled in container)
 # This allows data updates without rebuilding the container

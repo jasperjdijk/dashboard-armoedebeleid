@@ -67,7 +67,7 @@ COLOR_INFORMAL_OTHER = CHART_COLORS[2]     # #C5C5C5 - Other informal regulation
 
 @st.cache_data
 def load_data(key):
-    """Load all required data from Excel file and merge municipality information"""
+    """Load all required data from Excel or Parquet file and merge municipality information"""
     # Support both Streamlit secrets.toml and environment variables (for Cloud Run)
     # Use defensive check to avoid issues when secrets.toml doesn't exist
     try:
@@ -77,19 +77,35 @@ def load_data(key):
 
     if has_secrets:
         # Streamlit Cloud or local development
-        excel_url = st.secrets["excel_url"]
+        data_url = st.secrets["excel_url"]
         key_all = st.secrets["key_all"]
         key_barneveld = st.secrets["key_barneveld"]
         key_delft = st.secrets["key_delft"]
     else:
         # Google Cloud Run (environment variables)
-        excel_url = os.getenv("EXCEL_URL", "dataoverzicht_dashboard_armoedebeleid.xlsx")
+        data_url = os.getenv("EXCEL_URL", "dataoverzicht_dashboard_armoedebeleid.xlsx")
         key_all = os.getenv("KEY_ALL", "")
         key_barneveld = os.getenv("KEY_BARNEVELD", "")
         key_delft = os.getenv("KEY_DELFT", "")
 
-    excel_file = pd.ExcelFile(excel_url)
-    df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht")
+    # Load data - prefer Parquet for speed, fall back to Excel
+    # Check if URL contains .parquet (handle query params like ?dl=1)
+    is_parquet = '.parquet' in data_url.lower()
+
+    if is_parquet:
+        # Load from Parquet (5-10x faster than Excel)
+        df = pd.read_parquet(data_url)
+    else:
+        # Load from Excel with only required columns
+        required_columns = [
+            'Gemeentenaam', 'GMcode', 'Inwoners', 'ID', 'N4', 'FR', 'WB', 'BT', 'CAV',
+            'WRD_HH01', 'IG_HH01', 'Referteperiode_HH01',
+            'WRD_HH02', 'IG_HH02', 'Referteperiode_HH02',
+            'WRD_HH03', 'IG_HH03', 'Referteperiode_HH03',
+            'WRD_HH04', 'IG_HH04', 'Referteperiode_HH04'
+        ]
+        excel_file = pd.ExcelFile(data_url)
+        df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht", usecols=required_columns)
 
     if key == key_all:
         return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '')]
@@ -266,6 +282,13 @@ def get_formal_informal_data(_df, hh, ink, refper, cav, key=None):
         .reset_index()
         .rename(columns={'GMcode': 'Gemeente'})
     )
+
+    # Ensure both Formeel and Informeel columns exist (they might be missing if no regulations match)
+    if 'Formeel' not in grouped.columns:
+        grouped['Formeel'] = 0
+    if 'Informeel' not in grouped.columns:
+        grouped['Informeel'] = 0
+
     grouped['Totaal'] = grouped['Formeel'] + grouped['Informeel']
     return grouped
 
@@ -1161,25 +1184,30 @@ try:
                 # Select columns for display
                 formatted_matching = formatted_matching[['Regeling', 'Waarde', 'Inkomensgrens']]
 
+                # Calculate height to show all rows (header: 38px + rows: 35px each + padding: 10px)
+                table_height = 38 + (len(formatted_matching) * 35) + 10
+
                 # Display table
                 st.dataframe(
                     formatted_matching,
                     width="stretch",
+                    height=table_height,
                     hide_index=True,
                     column_config={
-                        "Regeling": st.column_config.TextColumn("Regelingen", width=210),
+                        "Regeling": st.column_config.TextColumn("Regelingen", width=200),
                         "Waarde": st.column_config.TextColumn("Waarde", width=40),
                         "Inkomensgrens": st.column_config.TextColumn("Grens", width=30)
                     }
                 )
+                # Calculate total value of matching regulations
+                total_waarde = matching_df['Waarde'].sum() if not matching_df.empty else 0
+                total_waarde_formatted = format_dutch_currency(total_waarde, decimals=0)
+
+                st.markdown(f"Bovenstaande {formeel} regelingen voor een **{household_labels[selected_huishouden].lower()}** in **{gemeente_labels[selected_gemeente]}** met **{reftext}** een inkomen van **{selected_income_pct}%** van het sociaal minimum tellen op tot **{total_waarde_formatted}** per maand.", unsafe_allow_html=True)
+            
             else:
-                st.info("Geen passende regelingen gevonden.")
-
-            # Calculate total value of matching regulations
-            total_waarde = matching_df['Waarde'].sum() if not matching_df.empty else 0
-            total_waarde_formatted = format_dutch_currency(total_waarde, decimals=0)
-
-            st.markdown(f"Bovenstaande {formeel} regelingen voor een **{household_labels[selected_huishouden].lower()}** in **{gemeente_labels[selected_gemeente]}** met **{reftext}** een inkomen van **{selected_income_pct}%** van het sociaal minimum tellen op tot **{total_waarde_formatted}** per maand.", unsafe_allow_html=True)
+                st.info("Let op! Geen passende regelingen gevonden.")
+            
             st.markdown("De gemeente kent ook nog de onderstaande regelingen, die mogelijk niet van toepassing zijn of waarvan de waarde niet goed te bepalen was.")
             
             # =================================================================
