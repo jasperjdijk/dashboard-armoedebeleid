@@ -67,45 +67,22 @@ COLOR_INFORMAL_OTHER = CHART_COLORS[2]     # #C5C5C5 - Other informal regulation
 
 @st.cache_data
 def load_data(key):
-    """Load all required data from Excel or Parquet file and merge municipality information"""
+    """Load all required data from Parquet file and filter by municipality access"""
     # Support both Streamlit secrets.toml and environment variables (for Cloud Run)
-    # Use defensive check to avoid issues when secrets.toml doesn't exist
     try:
-        has_secrets = hasattr(st, 'secrets') and len(st.secrets) > 0 and "excel_url" in st.secrets
-    except Exception:
-        has_secrets = False
-
-    if has_secrets:
-        # Streamlit Cloud or local development
         data_url = st.secrets["excel_url"]
         key_all = st.secrets["key_all"]
         key_barneveld = st.secrets["key_barneveld"]
         key_delft = st.secrets["key_delft"]
-    else:
-        # Google Cloud Run (environment variables)
-        data_url = os.getenv("EXCEL_URL", "dataoverzicht_dashboard_armoedebeleid.xlsx")
+    except (AttributeError, KeyError, FileNotFoundError):
+        # Fall back to environment variables
+        data_url = os.getenv("EXCEL_URL", "dataset.parquet")
         key_all = os.getenv("KEY_ALL", "")
         key_barneveld = os.getenv("KEY_BARNEVELD", "")
         key_delft = os.getenv("KEY_DELFT", "")
 
-    # Load data - prefer Parquet for speed, fall back to Excel
-    # Check if URL contains .parquet (handle query params like ?dl=1)
-    is_parquet = '.parquet' in data_url.lower()
-
-    if is_parquet:
-        # Load from Parquet (5-10x faster than Excel)
-        df = pd.read_parquet(data_url)
-    else:
-        # Load from Excel with only required columns
-        required_columns = [
-            'Gemeentenaam', 'GMcode', 'Inwoners', 'ID', 'N4', 'FR', 'WB', 'BT', 'CAV',
-            'WRD_HH01', 'IG_HH01', 'Referteperiode_HH01',
-            'WRD_HH02', 'IG_HH02', 'Referteperiode_HH02',
-            'WRD_HH03', 'IG_HH03', 'Referteperiode_HH03',
-            'WRD_HH04', 'IG_HH04', 'Referteperiode_HH04'
-        ]
-        excel_file = pd.ExcelFile(data_url)
-        df = pd.read_excel(excel_file, sheet_name="Totaaloverzicht", usecols=required_columns)
+    # Load data from Parquet format
+    df = pd.read_parquet(data_url)
 
     if key == key_all:
         return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '')]
@@ -119,18 +96,13 @@ def load_data(key):
     return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '') & ~df['Gemeentenaam'].isin(excluded_municipalities)]
 
 
-def get_alle_gemeenten(_df, key):
-    """Get all unique municipality codes from the dataframe."""
-    return _df['GMcode'].unique()
-
-
 def format_dutch_currency(value, decimals=0):
     """Format number as Dutch currency (dot for thousands, comma for decimals)."""
     formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"€ {formatted}"
 
 
-def filter_regelingen(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
+def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
     """
     Apply standard filters to the dataframe and return a boolean mask.
 
@@ -148,16 +120,18 @@ def filter_regelingen(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
         Include health insurance discount: 0 = no, 1 = yes
     fr : int
         Formal regulation filter: 1 = formal, 2 = informal, 3 = both
-    gmcode : str, optional
-        Municipality code. If None, applies to all municipalities.
+    gmcodes : str or list
+        Municipality code(s). Can be a single code or list of codes.
     """
 
     wrd_col, ig_col, ref_col = f'WRD_{hh}', f'IG_{hh}', f'Referteperiode_{hh}'
 
     mask = (df['WB'] == 1) & (df[ig_col] >= ink) & (df[ref_col] <= refper)
 
-    if gmcode is not None:
-        mask &= (df['GMcode'] == gmcode)
+    # Ensure gmcodes is list-like for .isin()
+    if isinstance(gm, str):
+        gm = [gm]
+    mask &= df['GMcode'].isin(gm)
 
     if cav == 1:
         mask &= ((df['BT'] == 1) | (df['CAV'] == 1))
@@ -175,238 +149,229 @@ def filter_regelingen(df, hh, ink=1, refper=0, cav=0, fr=3, gmcode=None):
         wrd_col: 'WRD'
     })
 
-
 # ================================================================================
-# CACHED DATA FUNCTIONS FOR GRAPHS AND TABLE
+# DATA FUNCTIONS FOR GRAPHS AND TABLE
 # ================================================================================
-def regelingen_lijst(_df, gmcode, hh, ink, refper, cav, fr, key=None):
-    """Get table data for all regulations, with matching status. Sorted: matching by value, non-matching alphabetically."""
-    wrd_col, ig_col = f'WRD_{hh}', f'IG_{hh}'
-    regs = _df[_df['GMcode'] == gmcode]
-    df = filter_regelingen(_df, hh, ink, refper, cav, fr, gmcode)
-    matching_ids = df['ID']
+def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
+    # Get all regulations for this municipality
+    regs = df[df['GMcode'] == gm].copy()
 
-    grouped = regs.assign(
-        Regeling=regs['N4'],
-        Waarde=regs[wrd_col] / 12,
-        Inkomensgrens=regs[ig_col],
-        Matches=regs['ID'].isin(matching_ids)
-    ).groupby(['Regeling', 'Matches'], as_index=False).agg(
-        Waarde=('Waarde', 'sum'),
-        Inkomensgrens=('Inkomensgrens', 'min')
-    )
+    # Get regulation IDs that meet user input criteria
+    selected_regs = filter_regelingen(df, gm, hh, ink, refper, cav, fr)
 
-    return pd.concat([
-        grouped[grouped['Matches']].sort_values('Waarde', ascending=False),
-        grouped[~grouped['Matches']].sort_values('Regeling')
-    ])
+    # Add computed columns
+    regs['Regeling'] = regs['N4']
+    regs['Waarde'] = regs[f'WRD_{hh}'] / 12
+    regs['Inkomensgrens'] = regs[f'IG_{hh}']
+    regs['Matches'] = regs['ID'].isin(selected_regs['ID'])
+
+    # Group and aggregate
+    grouped = regs.groupby(['Regeling', 'Matches'], as_index=False).agg({
+        'Waarde': 'sum',
+        'Inkomensgrens': 'min'
+    })
+
+    # Sort and combine: matching by value (desc), non-matching alphabetically
+    matching = grouped[grouped['Matches']].sort_values('Waarde', ascending=False)
+    non_matching = grouped[~grouped['Matches']].sort_values('Regeling')
+
+    return pd.concat([matching, non_matching])
 
 
-def get_household_data(_df, ink, refper, cav, fr, key=None):
+def huishoudtypen_data(df, gm, hh_lbl, ink=1, refper=0, cav=0, fr=3):
     """Calculate values for all municipalities and all household types (Graph 1)."""
-    alle_gemeenten = get_alle_gemeenten(_df, key)
     results = []
 
-    for hh in ['HH01', 'HH02', 'HH03', 'HH04']:
-        df = filter_regelingen(_df, hh, ink, refper, cav, fr)
-        hh_data = (df.groupby('GMcode')['WRD'].sum() / 12)
-        hh_data = hh_data.reindex(alle_gemeenten, fill_value=0)
-        hh_data = hh_data.reset_index()
-        hh_data.columns = ['Gemeente', 'Waarde']
+    for hh in hh_lbl.keys():
+        filtered_df = filter_regelingen(df, gm, hh, ink, refper, cav, fr)
+
+        hh_data = filtered_df.groupby('GMcode').agg({
+            'WRD': 'sum',
+            'Gemeentenaam': 'first'
+        }).reset_index()
+
+        hh_data = hh_data.rename(columns={'GMcode': 'Gemeente'})
+        hh_data['Waarde'] = hh_data['WRD'] / 12
         hh_data['Huishouden'] = hh
-        results.append(hh_data)
+        hh_data['Huishouden_Label'] = hh_lbl[hh]
+
+        results.append(hh_data[['Gemeente', 'Gemeentenaam', 'Waarde', 'Huishouden', 'Huishouden_Label']])
 
     return pd.concat(results, ignore_index=True)
 
-def get_income_progression_data(_df, hh, ink, refper, cav, fr, key=None):
+
+def inkomensgroepen_data(df, gm, hh, ink_pct=100, refper=0, cav=0, fr=3):
     """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
-    # Calculate income levels to show based on selected income
-    final_digit = ink % 10
-    z = min(max(ink - 20, 100 + final_digit), 140 + final_digit)
-    income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
+    # Get gemeente lookup for filling reindexed rows
+    gem_lookup = df[['GMcode', 'Gemeentenaam']].drop_duplicates().set_index('GMcode')['Gemeentenaam']
 
-    alle_gemeenten = get_alle_gemeenten(_df, key)
+    # Calculate income levels to show based on selected income percentage (100-200)
+    # Show 6 levels in steps of 10, centered around selected income (start 20 below)
+    final_digit = ink_pct % 10  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
+    start = ink_pct - 20
+    start = max(100 + final_digit, min(140 + final_digit, start))  # Clamp to 100-200 range
+    income_levels_to_show = [level for level in range(start, start + 60, 10)]
+
     results = []
- 
-    for income_level in income_levels_to_show:
-        df = filter_regelingen(_df, hh, income_level, refper, cav, fr)
-        ink_data = (df.groupby('GMcode')['WRD'].sum() / 12)
-        ink_data = ink_data.reindex(alle_gemeenten, fill_value=0)
+
+    for ink_lvl in income_levels_to_show:
+        filtered_df = filter_regelingen(df, gm, hh, round(ink_lvl / 100, 2), refper, cav, fr)
+
+        if len(filtered_df) > 0:
+            ink_data = filtered_df.groupby('GMcode').agg({
+                'WRD': 'sum',
+                'Gemeentenaam': 'first'
+            })
+            ink_data['Waarde'] = ink_data['WRD'] / 12
+            ink_data = ink_data.reindex(gm, fill_value=0)
+            # Fill missing Gemeentenaam for reindexed rows
+            ink_data['Gemeentenaam'] = ink_data['Gemeentenaam'].fillna(gem_lookup)
+        else:
+            # No data for this income level, create empty structure with gemeente names
+            ink_data = pd.DataFrame(index=gm)
+            ink_data.index.name = 'GMcode'  # Set index name for consistency
+            ink_data['WRD'] = 0
+            ink_data['Waarde'] = 0
+            ink_data['Gemeentenaam'] = gem_lookup.reindex(gm)
+
         ink_data = ink_data.reset_index()
-        ink_data.columns = ['Gemeente', 'Waarde']
-        ink_data['Inkomen'] = income_level
-        results.append(ink_data)
+        ink_data = ink_data.rename(columns={'GMcode': 'Gemeente'})
+        ink_data['Inkomen'] = ink_lvl
+        results.append(ink_data[['Gemeente', 'Gemeentenaam', 'Waarde', 'Inkomen']])
 
     return pd.concat(results, ignore_index=True)
+
 
 @st.cache_data
-def get_income_line_data(_df, gmcode, hh, refper, cav, fr, key=None):
+def get_income_line_data(_df, gm, hh, refper=0, cav=0, fr=3):
     """Calculate values for selected municipality at all income levels (Graph 2 line)."""
-    all_income_levels = [i/100 for i in range(100, 201, 1)]
+    all_income_levels_pct = range(100, 201)
     results = []
-    for income_level in all_income_levels:
-        df = filter_regelingen(_df, hh, income_level, refper, cav, fr, gmcode)
-         
+    for income_pct in all_income_levels_pct:
+        filtered_df = filter_regelingen(_df, gm, hh, income_pct / 100, refper, cav, fr)
+
         results.append({
-            'Inkomen': income_level,
-            'Waarde': df['WRD'].sum() / 12
+            'Inkomen': income_pct,  # Store as percentage (integer)
+            'Waarde': filtered_df['WRD'].sum() / 12
         })
 
     return pd.DataFrame(results)
 
-def get_formal_informal_data(_df, hh, ink, refper, cav, key=None):
+
+def in_formeel_data(df, gm, hh, ink=1, refper=0, cav=0):
     """Calculate formal and informal values for all municipalities (Graph 3)."""
-    gemeente_codes = get_alle_gemeenten(_df, key)
-    df = filter_regelingen(
-        df=_df,
-        hh=hh,
-        ink=ink,
-        refper=refper,
-        cav=cav,
-        fr=3,
-        gmcode=None
-    )
+    # Get gemeente lookup for filling reindexed rows
+    gem_lookup = df[['GMcode', 'Gemeentenaam']].drop_duplicates().set_index('GMcode')['Gemeentenaam']
 
-    grouped = (
-        df.groupby(['GMcode', 'FR'])['WRD']
-        .sum()
-        .div(12)
-        .unstack('FR', fill_value=0)
-        .rename(columns={'Ja': 'Formeel', 'Nee': 'Informeel'})
-        .reindex(gemeente_codes, fill_value=0)
-        .reset_index()
-        .rename(columns={'GMcode': 'Gemeente'})
-    )
+    filtered_df = filter_regelingen(df, gm, hh, ink, refper, cav)
 
-    # Ensure both Formeel and Informeel columns exist (they might be missing if no regulations match)
-    if 'Formeel' not in grouped.columns:
-        grouped['Formeel'] = 0
-    if 'Informeel' not in grouped.columns:
-        grouped['Informeel'] = 0
+    # Group and aggregate WRD and Gemeentenaam
+    agg_data = filtered_df.groupby(['GMcode', 'FR']).agg({
+        'WRD': 'sum',
+        'Gemeentenaam': 'first'
+    })
 
+    # Unstack FR to get Formeel/Informeel columns
+    wrd_unstacked = agg_data['WRD'].unstack('FR', fill_value=0).div(12)
+    gem_names = agg_data['Gemeentenaam'].groupby('GMcode').first()
+
+    # Rename columns
+    wrd_unstacked = wrd_unstacked.rename(columns={'Ja': 'Formeel', 'Nee': 'Informeel'})
+
+    # Ensure both columns exist
+    for col in ['Formeel', 'Informeel']:
+        if col not in wrd_unstacked.columns:
+            wrd_unstacked[col] = 0
+
+    # Reindex and add Gemeentenaam
+    wrd_unstacked = wrd_unstacked.reindex(gm, fill_value=0)
+    wrd_unstacked['Gemeentenaam'] = gem_names.reindex(wrd_unstacked.index).fillna(gem_lookup)
+
+    # Reset index and rename
+    grouped = wrd_unstacked.reset_index().rename(columns={'GMcode': 'Gemeente'})
     grouped['Totaal'] = grouped['Formeel'] + grouped['Informeel']
-    return grouped
 
-def get_threshold_data(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, key=None):
+    return grouped[['Gemeente', 'Gemeentenaam', 'Formeel', 'Informeel', 'Totaal']]
+
+
+def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
     """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
-    gemeente_codes = get_alle_gemeenten(_df, key)
-    threshold_data_values = []
-    for gmcode in gemeente_codes:
-        gemeente_regs = _df[_df['GMcode'] == gmcode]
-        if len(gemeente_regs) == 0:
-            continue
+    # Filter once for all municipalities (instead of once per municipality)
+    filtered_df = filter_regelingen(df, gm, hh, 1, refper, cav, fr)
 
-        df = filter_regelingen(
-            df=_df,
-            hh=selected_huishouden,
-            ink=1.0,
-            refper=selected_referteperiode,
-            cav=selected_cav,
-            fr=selected_fr,
-            gmcode=gmcode)
+    # Add calculated columns
+    filtered_df = filtered_df.assign(
+        monthly_wrd=filtered_df['WRD'] / 12,
+        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / 12
+    )
 
-        wrd_at_100 = df['WRD'].sum() / 12
-        weighted_sum = (df['WRD'] * (df['IG'] - 1)).sum() /12
+    # Group by municipality and aggregate
+    result = filtered_df.groupby('GMcode').agg({
+        'monthly_wrd': 'sum',
+        'weighted_component': 'sum',
+        'Inwoners': 'first',
+        'Gemeentenaam': 'first'
+    }).reset_index()
 
-        if wrd_at_100 > 0:
-            weighted_ig = 1 + (weighted_sum / wrd_at_100)
-        else:
-            weighted_ig = None
+    result.columns = ['Gemeente', 'Waarde', 'weighted_sum', 'Inwoners', 'Gemeentenaam']
 
-        if 'Inwoners' in _df.columns and len(gemeente_regs) > 0:
-            try:
-                inwoners = gemeente_regs['Inwoners'].iloc[0]
-                if pd.isna(inwoners):
-                    inwoners = 50000
-            except (IndexError, KeyError):
-                inwoners = 50000
-        else:
-            inwoners = 50000
+    # Filter out zero values and calculate income threshold
+    result['Inkomensgrens'] = ((1 + (result['weighted_sum'] / result['Waarde']))*100).astype(int)
 
-        if weighted_ig is not None:
-            threshold_data_values.append({
-                'Gemeente': gmcode,
-                'Inkomensgrens': weighted_ig,
-                'Waarde': wrd_at_100,
-                'Inwoners': inwoners
-            })
-
-    return pd.DataFrame(threshold_data_values)
+    return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
 
 # ================================================================================
-# CACHED FIGURE FUNCTIONS
+# FIGURE FUNCTIONS
 # ================================================================================
 
-def create_household_figure(_df, selected_income, selected_income_pct, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
+def huishoudtypen_grafiek(df, sel_gm, all_gm, hh_lbl, ink=1, refper=0, cav=0, fr=3):
     """Create box plot figure for household comparison (Graph 1)."""
+
     # Get data
-    plot_df = get_household_data(_df, selected_income, selected_referteperiode, selected_cav, selected_fr, key=key)
-    plot_df['Gemeentenaam'] = plot_df['Gemeente'].map(gemeente_labels)
-    plot_df['Huishouden_Label'] = plot_df['Huishouden'].map(household_labels)
+    plot_df = huishoudtypen_data(df, all_gm, hh_lbl, ink, refper, cav, fr)
+
+    # Add hover text for all data (before splitting)
+    plot_df['hover_text'] = (
+        "<b>" + plot_df['Gemeentenaam'].astype(str) + "</b><br>" +
+        f"{int(ink * 100)}% sociaal minimum<br>Waarde: " +
+        plot_df['Waarde'].apply(format_dutch_currency).astype(str)
+    )
 
     fig = go.Figure()
-    for household in sorted(plot_df['Huishouden_Label'].unique()):
-        household_data = plot_df[plot_df['Huishouden_Label'] == household]
+    for hh_code, hh_label in hh_lbl.items():
+        household_data = plot_df[plot_df['Huishouden'] == hh_code]
 
-        selected_data = household_data[household_data['Gemeente'] == selected_gemeente]
-        other_data = household_data[household_data['Gemeente'] != selected_gemeente]
+        # Create both traces with their specific styling (Box plots need separate traces for different colors)
+        trace_configs = [
+            {'data': household_data[household_data['Gemeente'] != sel_gm], 'size': 8, 'color': COLOR_OTHER, 'opacity': 0.6},
+            {'data': household_data[household_data['Gemeente'] == sel_gm], 'size': 10, 'color': COLOR_SELECTED, 'opacity': 1.0}
+        ]
 
-        if len(other_data) > 0:
-            # Vectorized hover text
-            hover_text_other = (
-                "<b>" + other_data['Gemeentenaam'].astype(str) + "</b><br>" +
-                f"{selected_income_pct}% sociaal minimum<br>Waarde: € " +
-                other_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-            )
+        for config in trace_configs:
+            data = config['data']
+            if len(data) > 0:
+                fig.add_trace(go.Box(
+                    x=[hh_label] * len(data),
+                    y=data['Waarde'],
+                    name=hh_label,
+                    boxpoints='all',
+                    jitter=0.3,
+                    pointpos=0,
+                    marker=dict(
+                        size=config['size'],
+                        color=config['color'],
+                        opacity=config['opacity']
+                    ),
+                    hovertext=data['hover_text'],
+                    hoverinfo='text',
+                    customdata=data['Gemeente'].values,
+                    showlegend=False,
+                    fillcolor='rgba(255,255,255,0)',
+                    line=dict(color='rgba(255,255,255,0)')
+                ))
 
-            fig.add_trace(go.Box(
-                x=[household] * len(other_data),
-                y=other_data['Waarde'],
-                name=household,
-                boxpoints='all',
-                jitter=0.3,
-                pointpos=0,
-                marker=dict(
-                    size=8,
-                    color=COLOR_OTHER,
-                    opacity=0.6
-                ),
-                hovertext=hover_text_other,
-                hoverinfo='text',
-                customdata=other_data['Gemeente'].values,
-                showlegend=False,
-                fillcolor='rgba(255,255,255,0)',
-                line=dict(color='rgba(255,255,255,0)')
-            ))
-
-        if len(selected_data) > 0:
-            # Vectorized hover text
-            hover_text_selected = (
-                "<b>" + selected_data['Gemeentenaam'].astype(str) + "</b><br>" +
-                f"{selected_income_pct}% sociaal minimum<br>Waarde: € " +
-                selected_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-            )
-
-            fig.add_trace(go.Box(
-                x=[household] * len(selected_data),
-                y=selected_data['Waarde'],
-                name=household,
-                boxpoints='all',
-                jitter=0.3,
-                pointpos=0,
-                marker=dict(
-                    size=10,
-                    color=COLOR_SELECTED,
-                ),
-                hovertext=hover_text_selected,
-                hoverinfo='text',
-                customdata=selected_data['Gemeente'].values,
-                showlegend=False,
-                fillcolor='rgba(255,255,255,0)',
-                line=dict(color='rgba(255,255,255,0)')
-            ))
-
-    selected_municipality_data = plot_df[plot_df['Gemeente'] == selected_gemeente]
+    # Add value annotations for selected municipality
+    selected_municipality_data = plot_df[plot_df['Gemeente'] == sel_gm]
     for _, row in selected_municipality_data.iterrows():
         fig.add_annotation(
             x=row['Huishouden_Label'],
@@ -426,7 +391,8 @@ def create_household_figure(_df, selected_income, selected_income_pct, selected_
         'Paar': 'Paar',
         'Paar met twee kinderen': 'Paar met<br>twee kinderen'
     }
-    x_labels = [label_mapping.get(label, label) for label in sorted(plot_df['Huishouden_Label'].unique())]
+    hh_labels = list(hh_lbl.values())
+    x_labels = [label_mapping.get(label, label) for label in hh_labels]
 
     fig.update_layout(
         xaxis_title="",
@@ -445,7 +411,7 @@ def create_household_figure(_df, selected_income, selected_income_pct, selected_
             tickfont=dict(size=14),
             tickangle=0,
             tickmode='array',
-            tickvals=sorted(plot_df['Huishouden_Label'].unique()),
+            tickvals=hh_labels,
             ticktext=x_labels,
             fixedrange=True
         )
@@ -453,62 +419,56 @@ def create_household_figure(_df, selected_income, selected_income_pct, selected_
 
     return fig
 
-def create_income_figure(_df, selected_huishouden, selected_income_pct, selected_income, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
+
+def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=0, cav=0, fr=3):
     """Create line chart figure for income progression (Graph 2)."""
     fig_income = go.Figure()
 
     # Get cached data for all municipalities at specific income levels
-    income_df = get_income_progression_data(
-        _df, selected_huishouden, selected_income_pct, selected_referteperiode,
-        selected_cav, selected_fr, key=key
+    inkomensgroepen_df = inkomensgroepen_data(
+        df, all_gm, hh, ink_pct, refper, cav, fr
     )
 
-    # Calculate income levels for x-axis ticks
-    final_digit = selected_income_pct % 10
-    z = min(max(selected_income_pct - 20, 100 + final_digit), 140 + final_digit)
-    income_levels_to_show = [z/100, (z+10)/100, (z+20)/100, (z+30)/100, (z+40)/100, (z+50)/100]
+    # Extract income levels from data for x-axis ticks
+    income_levels_to_show = sorted(inkomensgroepen_df['Inkomen'].unique())
 
-    # Split data into selected and other municipalities
-    selected_marker_data = income_df[income_df['Gemeente'] == selected_gemeente].copy()
-    other_marker_data = income_df[income_df['Gemeente'] != selected_gemeente].copy()
-
-    # Add gemeente names and create hover text vectorized for other municipalities
-    other_marker_data['Gemeentenaam'] = other_marker_data['Gemeente'].map(gemeente_labels)
-    other_marker_data['hover_text'] = (
-        "<b>" + other_marker_data['Gemeentenaam'].astype(str) + "</b><br>" +
-        household_labels[selected_huishouden] + "<br>Waarde: € " +
-        other_marker_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+    # Create hover text for all municipalities
+    inkomensgroepen_df['hover_text'] = (
+        "<b>" + inkomensgroepen_df['Gemeentenaam'].astype(str) + "</b><br>" +
+        hh_lbl[hh] + "<br>Waarde: " +
+        inkomensgroepen_df['Waarde'].apply(format_dutch_currency).astype(str)
     )
 
-    # Single trace for all other municipalities
-    if len(other_marker_data) > 0:
-        fig_income.add_trace(go.Scatter(
-            x=other_marker_data['Inkomen'] * 100,
-            y=other_marker_data['Waarde'],
-            mode='markers',
-            name='Overige gemeenten',
-            marker=dict(
-                size=8,
-                color=COLOR_OTHER,
-                opacity=0.6
-            ),
-            hovertext=other_marker_data['hover_text'],
-            hoverinfo='text',
-            showlegend=False
-        ))
+    # Add visual properties based on whether municipality is selected
+    is_selected = inkomensgroepen_df['Gemeente'] == sel_gm
+    inkomensgroepen_df['marker_color'] = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER})
+    inkomensgroepen_df['marker_size'] = is_selected.map({True: 10, False: 8})
+    inkomensgroepen_df['marker_opacity'] = is_selected.map({True: 1.0, False: 0.6})
+
+    fig_income.add_trace(go.Scatter(
+        x=inkomensgroepen_df['Inkomen'],
+        y=inkomensgroepen_df['Waarde'],
+        mode='markers',
+        name='Gemeenten',
+        marker=dict(
+            size=inkomensgroepen_df['marker_size'],
+            color=inkomensgroepen_df['marker_color'],
+            opacity=inkomensgroepen_df['marker_opacity']
+        ),
+        hovertext=inkomensgroepen_df['hover_text'],
+        hoverinfo='text',
+        showlegend=False
+    ))
 
     # Get cached line data for selected municipality
     selected_all_df = get_income_line_data(
-        _df, selected_gemeente, selected_huishouden, selected_referteperiode,
-        selected_cav, selected_fr, key=key
+        df, sel_gm, hh, refper, cav, fr
     )
 
-    selected_gemeente_name = gemeente_labels[selected_gemeente]
     fig_income.add_trace(go.Scatter(
-        x=selected_all_df['Inkomen'] * 100,
+        x=selected_all_df['Inkomen'],
         y=selected_all_df['Waarde'],
         mode='lines',
-        name=selected_gemeente_name,
         line=dict(
             color=COLOR_SELECTED,
             width=2
@@ -517,43 +477,21 @@ def create_income_figure(_df, selected_huishouden, selected_income_pct, selected
         showlegend=False
     ))
 
-    # Vectorized hover text for selected municipality
-    selected_marker_data['hover_text'] = (
-        "<b>" + selected_gemeente_name + "</b><br>" +
-        household_labels[selected_huishouden] + "<br>Waarde: € " +
-        selected_marker_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+    # Add label for the selected income level
+    value = selected_all_df.loc[selected_all_df['Inkomen'] == ink_pct]['Waarde'].squeeze()
+    fig_income.add_annotation(
+        x=ink_pct,
+        y=value,
+        text=format_dutch_currency(value),
+        showarrow=False,
+        xanchor='center',
+        xshift=0,
+        yshift=15,
+        font=dict(size=14, color='black')
     )
 
-    fig_income.add_trace(go.Scatter(
-        x=selected_marker_data['Inkomen'] * 100,
-        y=selected_marker_data['Waarde'],
-        mode='markers',
-        name=selected_gemeente_name,
-        marker=dict(
-            size=10,
-            color=COLOR_SELECTED
-        ),
-        hovertext=selected_marker_data['hover_text'],
-        hoverinfo='text',
-        showlegend=False
-    ))
-
-    # Add label for the selected income level
-    selected_income_value = selected_all_df[abs(selected_all_df['Inkomen'] - selected_income) < 0.001]['Waarde'].values
-    if len(selected_income_value) > 0:
-        fig_income.add_annotation(
-            x=selected_income_pct,
-            y=selected_income_value[0],
-            text=format_dutch_currency(selected_income_value[0]),
-            showarrow=False,
-            xanchor='center',
-            xshift=0,
-            yshift=15,
-            font=dict(size=14, color='black')
-        )
-
     # Create tick values matching income_levels_to_show
-    tick_vals = [round(level * 100) for level in income_levels_to_show]
+    tick_vals = income_levels_to_show
     tick_text = [f'{val}%' for val in tick_vals]
 
     fig_income.update_layout(
@@ -580,50 +518,44 @@ def create_income_figure(_df, selected_huishouden, selected_income_pct, selected
 
     return fig_income
 
-def create_formal_informal_figure(_df, selected_huishouden, selected_income, selected_income_pct, selected_referteperiode, selected_cav, selected_gemeente, gemeente_labels, household_labels, key=None):
+
+def in_formeel_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=0, cav=0):
     """Create stacked bar chart for formal vs informal regulations (Graph 3)."""
     # Get cached formal/informal data
-    bar_data = get_formal_informal_data(
-        _df, selected_huishouden, selected_income, selected_referteperiode,
-        selected_cav, key=key
+    bar_data = in_formeel_data(
+        df, all_gm, hh, ink_pct / 100, refper, cav
+    ).sort_values('Formeel', ascending=False)
+
+    # Add visual properties and hover text to dataframe
+    is_selected = bar_data['Gemeente'] == sel_gm
+    bar_data['color_formal'] = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER})
+    bar_data['color_informal'] = is_selected.map({True: COLOR_INFORMAL_SELECTED, False: COLOR_INFORMAL_OTHER})
+
+    hover_base = f"{hh_lbl[hh]}<br>{ink_pct}% sociaal minimum<br>"
+    bar_data['hover_formal'] = bar_data['Formeel'].apply(
+        lambda val: f"{hover_base}Waarde formele regelingen: {format_dutch_currency(val)}<extra></extra>"
     )
-    bar_data['Gemeentenaam'] = bar_data['Gemeente'].map(gemeente_labels)
-    bar_data = bar_data.sort_values('Formeel', ascending=False)
+    bar_data['hover_informal'] = bar_data['Informeel'].apply(
+        lambda val: f"{hover_base}Waarde informele regelingen: {format_dutch_currency(val)}<extra></extra>"
+    )
 
-    # Vectorized color and hover text generation
-    is_selected = bar_data['Gemeente'] == selected_gemeente
-    colors_formal = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER}).tolist()
-    colors_informal = is_selected.map({True: COLOR_INFORMAL_SELECTED, False: COLOR_INFORMAL_OTHER}).tolist()
-
-    hover_prefix = f"{household_labels[selected_huishouden]}<br>{selected_income_pct}% sociaal minimum<br>"
-    hover_formal = (
-        hover_prefix + "Waarde formele regelingen: € " +
-        bar_data['Formeel'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) +
-        "<extra></extra>"
-    ).tolist()
-    hover_informal = (
-        hover_prefix + "Waarde informele regelingen: € " +
-        bar_data['Informeel'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) +
-        "<extra></extra>"
-    ).tolist()
-
-    fig_bar = go.Figure()
-
-    fig_bar.add_trace(go.Bar(
-        x=bar_data['Gemeentenaam'],
-        y=bar_data['Formeel'],
-        name='Formeel',
-        marker=dict(color=colors_formal),
-        hovertemplate=hover_formal
-    ))
-
-    fig_bar.add_trace(go.Bar(
-        x=bar_data['Gemeentenaam'],
-        y=bar_data['Informeel'],
-        name='Informeel',
-        marker=dict(color=colors_informal),
-        hovertemplate=hover_informal
-    ))
+    # Create figure with traces
+    fig_bar = go.Figure([
+        go.Bar(
+            x=bar_data['Gemeentenaam'],
+            y=bar_data['Formeel'],
+            name='Formeel',
+            marker_color=bar_data['color_formal'],
+            hovertemplate=bar_data['hover_formal']
+        ),
+        go.Bar(
+            x=bar_data['Gemeentenaam'],
+            y=bar_data['Informeel'],
+            name='Informeel',
+            marker_color=bar_data['color_informal'],
+            hovertemplate=bar_data['hover_informal']
+        )
+    ])
 
     fig_bar.update_layout(
         barmode='stack',
@@ -633,103 +565,64 @@ def create_formal_informal_figure(_df, selected_huishouden, selected_income, sel
         showlegend=True,
         dragmode=False,
         margin=dict(t=0, b=100, l=50, r=20, autoexpand=False),
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=0.95,
-            xanchor="right",
-            x=0.99
-        ),
-        yaxis=dict(
-            tickprefix="€ ",
-            tickfont=dict(size=14),
-            fixedrange=True
-        ),
-        xaxis=dict(
-            tickfont=dict(size=14),
-            tickangle=-45,
-            fixedrange=True
-        )
+        legend=dict(orientation="h", yanchor="top", y=0.95, xanchor="right", x=0.99),
+        yaxis=dict(tickprefix="€ ", tickfont=dict(size=14), fixedrange=True),
+        xaxis=dict(tickfont=dict(size=14), tickangle=-45, fixedrange=True)
     )
 
     return fig_bar
 
-def create_threshold_figure(_df, selected_huishouden, selected_referteperiode, selected_cav, selected_fr, selected_gemeente, gemeente_labels, household_labels, key=None):
+
+def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0, fr=3):
     """Create scatter plot for value vs income threshold (Graph 4)."""
     # Get cached threshold data
-    threshold_data = get_threshold_data(
-        _df, selected_huishouden, selected_referteperiode, selected_cav,
-        selected_fr, key=key
+    threshold_data = gem_inkomensgrenzen_data(
+        df, all_gm, hh, refper, cav, fr
     )
-    threshold_data['Gemeentenaam'] = threshold_data['Gemeente'].map(gemeente_labels)
+
     fig_threshold = go.Figure()
 
     if len(threshold_data) > 0:
-        selected_threshold_data = threshold_data[threshold_data['Gemeente'] == selected_gemeente]
-        other_threshold_data = threshold_data[threshold_data['Gemeente'] != selected_gemeente]
-    else:
-        selected_threshold_data = pd.DataFrame()
-        other_threshold_data = pd.DataFrame()
+        # Add visual properties based on whether municipality is selected
+        is_selected = threshold_data['Gemeente'] == sel_gm
+        threshold_data['marker_color'] = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER})
+        threshold_data['marker_opacity'] = is_selected.map({True: 1.0, False: 0.6})
 
-    if len(other_threshold_data) > 0:
-        # Vectorized hover text generation
-        other_threshold_data = other_threshold_data.copy()
-        other_threshold_data['hover_text'] = (
-            "<b>" + other_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
-            household_labels[selected_huishouden] + "<br>Inkomensgrens: " +
-            (other_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
-            "Waarde bij 100% sociaal minimum: € " +
-            other_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
-            "Inwoners: " + other_threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
+        # Format numbers for hover text
+        threshold_data['ig_pct'] = threshold_data['Inkomensgrens'].astype(str)
+        threshold_data['waarde_fmt'] = threshold_data['Waarde'].apply(format_dutch_currency)
+        threshold_data['inwoners_fmt'] = threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.'))
+
+        # Create hover text
+        threshold_data['hover_text'] = (
+            "<b>" + threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
+            hh_lbl[hh] + "<br>Gemiddelde Inkomensgrens: " +
+            threshold_data['ig_pct'] + "%<br>" +
+            "Waarde bij 100% sociaal minimum: " + threshold_data['waarde_fmt'] + "<br>" +
+            "Inwoners: " + threshold_data['inwoners_fmt']
         )
 
+        # Add single scatter trace with all municipalities
         fig_threshold.add_trace(go.Scatter(
-            x=other_threshold_data['Inkomensgrens'] * 100,
-            y=other_threshold_data['Waarde'],
+            x=threshold_data['Inkomensgrens'],
+            y=threshold_data['Waarde'],
             mode='markers',
             marker=dict(
-                size=other_threshold_data['Inwoners'] / 10000,
-                color=COLOR_OTHER,
-                opacity=0.6,
-                sizemode='diameter'
+                size=threshold_data['Inwoners'] / 200,
+                color=threshold_data['marker_color'],
+                opacity=threshold_data['marker_opacity'],
+                sizemode='area'
             ),
-            hovertext=other_threshold_data['hover_text'],
+            hovertext=threshold_data['hover_text'],
             hoverinfo='text',
-            customdata=other_threshold_data['Gemeente'].values,
-            showlegend=False
-        ))
-
-    if len(selected_threshold_data) > 0:
-        # Vectorized hover text generation
-        selected_threshold_data = selected_threshold_data.copy()
-        selected_threshold_data['hover_text'] = (
-            "<b>" + selected_threshold_data['Gemeentenaam'].astype(str) + "</b><br>" +
-            household_labels[selected_huishouden] + "<br>Gemiddelde inkomensgrens: " +
-            (selected_threshold_data['Inkomensgrens'] * 100).astype(int).astype(str) + "%<br>" +
-            "Waarde bij 100% sociaal minimum: € " +
-            selected_threshold_data['Waarde'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str) + "<br>" +
-            "Inwoners: " + selected_threshold_data['Inwoners'].apply(lambda x: f"{x:,.0f}".replace(',', '.')).astype(str)
-        )
-
-        fig_threshold.add_trace(go.Scatter(
-            x=selected_threshold_data['Inkomensgrens'] * 100,
-            y=selected_threshold_data['Waarde'],
-            mode='markers',
-            marker=dict(
-                size=selected_threshold_data['Inwoners'] / 10000,
-                color=COLOR_SELECTED,
-                sizemode='diameter'
-            ),
-            hovertext=selected_threshold_data['hover_text'],
-            hoverinfo='text',
-            customdata=selected_threshold_data['Gemeente'].values,
             showlegend=False
         ))
 
         # Add label for selected municipality
-        for _, row in selected_threshold_data.iterrows():
+        selected_data = threshold_data[is_selected]
+        for _, row in selected_data.iterrows():
             fig_threshold.add_annotation(
-                x=row['Inkomensgrens'] * 100,
+                x=row['Inkomensgrens'],
                 y=row['Waarde'],
                 text=row['Gemeentenaam'],
                 showarrow=False,
@@ -771,7 +664,7 @@ try:
     df = load_data(data_key)
 
     # Household type mapping
-    household_labels = {
+    hh_lbl = {
         'HH01': 'Alleenstaande',
         'HH02': 'Alleenstaande ouder met kind',
         'HH03': 'Paar',
@@ -781,10 +674,10 @@ try:
     # ----------------------------------------------------------------------------
     # Header and Gemeente Labels Preparation
     # ----------------------------------------------------------------------------
-    st.title("Dashboard armoedebeleid", anchor=False)
+    st.title("Dashboard armoedebeleid", text_alignment="center", anchor=False)
 
     # Prepare gemeente labels before tabs (more efficient with set_index)
-    gemeente_labels = (df[['GMcode', 'Gemeentenaam']]
+    gm_lbl = (df[['GMcode', 'Gemeentenaam']]
                        .dropna()
                        .drop_duplicates()
                        .astype(str)
@@ -797,16 +690,39 @@ try:
 
     # Get defaults from URL query params (fall back to defaults if not present)
     params = st.query_params
-    default_income = int(params.get("ink", 100))
-    default_gemeente = params.get("gm", "GM0363")
-    default_huishouden = params.get("hh", "HH04")
-    default_refper = int(params.get("ref", 0))
+    default_income      = int(params.get("ink", 100))
+    if default_income not in range(100, 200):
+        default_income = 100
+
+    default_huishouden  = params.get("hh", list(hh_lbl.keys())[0])
+    if default_huishouden not in hh_lbl:
+        default_huishouden = list(hh_lbl.keys())[0]
+
+    default_refper      = int(params.get("ref", 0))
+    if default_refper not in [0, 1, 3, 5]:
+        default_refper = 0
+
+    default_cav         = params.get("cav", "0") == "1"
+
+    # Ensure gemeente exists in the data (handles invalid codes or API key filtering)
+    default_gemeente = params.get("gm", list(gm_lbl.keys())[0])
+    if default_gemeente not in gm_lbl:
+        default_gemeente = list(gm_lbl.keys())[0]
+    
+    # URL format: reg=1 (Formeel), reg=2 (Informeel), reg=3 (both)
+    default_fr = int(params.get("reg", 3))
+    if default_fr == 1:
+        default_reg_types = ["Formeel"]
+    elif default_fr == 2:
+        default_reg_types = ["Informeel"]
+    else:
+        default_reg_types = ["Formeel", "Informeel"]
 
     with st.sidebar:
         st.header("Filters", anchor=False)
 
-        selected_income_pct = st.slider(
-            "Inkomen",
+        sel_ink_pct = st.slider(
+            label="Inkomen",
             min_value=100,
             max_value=200,
             value=default_income,
@@ -815,57 +731,54 @@ try:
             key="income",
             help="Als percentage van het sociale minimum (bijstandsniveau)"
         )
-        selected_income = selected_income_pct / 100
 
-        # Ensure default gemeente exists in the data
-        if default_gemeente not in gemeente_labels:
-            default_gemeente = list(gemeente_labels.keys())[0]
-
-        selected_gemeente = st.selectbox(
-            "Gemeente",
-            options=gemeente_labels.keys(),
-            format_func=lambda x: gemeente_labels[x],
-            index=list(gemeente_labels.keys()).index(default_gemeente),
+        sel_gm = st.selectbox(
+            label="Gemeente",
+            options=gm_lbl,
+            format_func=lambda x: gm_lbl[x],
+            index=list(gm_lbl).index(default_gemeente),
             key="gemeente",
             help="Welke gemeente moet worden uitgelicht in het dashboard?"
         )
 
         # Ensure default huishouden is valid
-        if default_huishouden not in household_labels:
+        if default_huishouden not in hh_lbl:
             default_huishouden = "HH04"
 
-        selected_huishouden = st.selectbox(
-            "Huishouden:",
-            options=list(household_labels.keys()),
-            format_func=lambda x: household_labels[x],
-            index=list(household_labels.keys()).index(default_huishouden),
+        sel_hh = st.selectbox(
+            label="Huishouden:",
+            options=hh_lbl,
+            format_func=lambda x: hh_lbl[x],
+            index=list(hh_lbl).index(default_huishouden),
             key="huishouden",
             help="Welk huishoudtype wilt u meer over weten?"
         )
 
-        selected_referteperiode = st.segmented_control(
-            "Jaren met laag inkomen",
+        sel_refper = st.segmented_control(
+            label="Jaren met laag inkomen",
             options=[0, 1, 3, 5],
-            default=default_refper if default_refper in [0, 1, 2, 3, 4, 5] else 0,
+            default=default_refper,
             key="referteperiode",
             help="Jaren dat het voorbeeldhuishouden al het geselecteerde inkomen heeft (referteperiode)"
         )
 
-        # Regulation type selector (multi-select)
-        # URL format: reg=1 (Formeel), reg=2 (Informeel), reg=3 (both)
-        default_fr = int(params.get("reg", 3))
-
-        # Convert fr value to default_reg_types list
-        if default_fr == 1:
-            default_reg_types = ["Formeel"]
-        elif default_fr == 2:
-            default_reg_types = ["Informeel"]
-        else:
-            default_reg_types = ["Formeel", "Informeel"]
-
         # Initialize session state if it doesn't exist - no rerun needed
         if "reg_types" not in st.session_state:
             st.session_state.reg_types = default_reg_types if default_reg_types else ["Formeel", "Informeel"]
+        if "prev_reg_types" not in st.session_state:
+            st.session_state.prev_reg_types = st.session_state.reg_types
+
+        # Check before rendering: if current value is empty, fix it based on previous selection
+        if not st.session_state.reg_types:
+            if len(st.session_state.prev_reg_types) == 1:
+                # If only one was selected, switch to the other one
+                if "Formeel" in st.session_state.prev_reg_types:
+                    st.session_state.reg_types = ["Informeel"]
+                else:
+                    st.session_state.reg_types = ["Formeel"]
+            else:
+                # Default to both if we can't determine
+                st.session_state.reg_types = ["Formeel", "Informeel"]
 
         # Regulation type values: Formeel=1, Informeel=2, both=3
         reg_type_values = {"Formeel": 1, "Informeel": 2}
@@ -877,7 +790,9 @@ try:
             help="Selecteer welke regelingen worden meegenomen: formele, informele of beide"
         )
 
-        default_cav = params.get("cav", "0") == "1"
+        # Update prev_reg_types after the widget (with the current, possibly corrected value)
+        st.session_state.prev_reg_types = st.session_state.reg_types
+
         toggle_cav = st.toggle("Korting gemeentepolis", value=default_cav, key="toggle_cav", help="Moet de korting op een eventuele geemeentepolis worden meegenomen op het totaalbedrag? (Deze polis is niet voor ieder huishouden voordelig)")
 
         # Legend
@@ -886,7 +801,7 @@ try:
         <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; align-items: center; gap: 8px;">
                 <div style="width: 12px; height: 12px; border-radius: 50%; background-color: {COLOR_SELECTED};"></div>
-                <span>{gemeente_labels[selected_gemeente]}</span>
+                <span>{gm_lbl[sel_gm]}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
                 <div style="width: 12px; height: 12px; border-radius: 50%; background-color: {COLOR_OTHER};"></div>
@@ -898,21 +813,24 @@ try:
     # Update URL with current selections (preserving the key parameter)
     # Only update if params actually changed to prevent unnecessary reruns
     new_params = {"key": params.get("key", "")} if params.get("key") else {}
-    new_params["ink"] = str(selected_income_pct)
-    new_params["gm"] = selected_gemeente
-    new_params["hh"] = selected_huishouden
-    new_params["ref"] = str(selected_referteperiode)
+    new_params["ink"] = str(sel_ink_pct)
+    new_params["gm"] = sel_gm
+    new_params["hh"] = sel_hh
+    new_params["ref"] = str(sel_refper)
     # Calculate selected_fr and CAV for URL
-    selected_fr = sum(reg_type_values.get(rt, 0) for rt in selected_reg_types) or 3
-    selected_cav = 1 if toggle_cav else 0
-    new_params["reg"] = str(selected_fr)
-    new_params["cav"] = str(selected_cav)
+    sel_fr = sum(reg_type_values.get(rt, 0) for rt in selected_reg_types) or 3
+    sel_cav = 1 if toggle_cav else 0
+    new_params["reg"] = str(sel_fr)
+    new_params["cav"] = str(sel_cav)
     # Only update query params if they changed
     if dict(st.query_params) != new_params:
         st.query_params.update(new_params)
 
     # Create two-column layout: graphs on left, table on right
     graph_col, table_col = st.columns([2, 1])
+
+    # Check if export buttons should be shown (only if ?export=1 in URL)
+    show_export = st.query_params.get("export") == "1"
 
     with graph_col:
         # Create tabs for the graphs
@@ -923,140 +841,123 @@ try:
             "Gemiddelde inkomensgrenzen"
         ])
 
+
+        if sel_fr == 1:
+            formeel = "**formele**"
+        elif sel_fr == 2:
+            formeel = "**informele**"
+        elif sel_fr == 3:
+            formeel = ""
+
+        if sel_cav == 0:
+            gemeentepolis = "**buiten beschouwing** gelaten"
+        elif sel_cav == 1:
+            gemeentepolis = "**hierin meegenomen**"
+
+        if sel_refper == 0:
+            reftext = "sinds kort"
+        else:
+            reftext = f"al {sel_refper} jaar"
+
+
     # ----------------------------------------------------------------------------
     # Graph 1: Box Plot - Value by Household Type
     # ----------------------------------------------------------------------------
     with tab1:
-        fig = create_household_figure(
-            df,
-            selected_income,
-            selected_income_pct,
-            selected_referteperiode,
-            selected_cav,
-            selected_fr,
-            selected_gemeente,
-            gemeente_labels,
-            household_labels,
-            key=data_key
+        fig = huishoudtypen_grafiek(
+            df, sel_gm, list(gm_lbl.keys()), hh_lbl, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr
         )
 
         st.plotly_chart(fig, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
-
-        # Export data to CSV - only show if ?export=1 in URL
-        try:
-            # Try newer Streamlit API first
-            show_export = st.query_params.get("export") == "1"
-        except AttributeError:
-            # Fallback to older API
-            query_params = st.experimental_get_query_params()
-            show_export = query_params.get("export", ["0"])[0] == "1"
-
-        if show_export:
-            plot_df = get_household_data(df, selected_income, selected_referteperiode, selected_cav, selected_fr, key=data_key)
-            plot_df['Gemeentenaam'] = plot_df['Gemeente'].map(gemeente_labels)
-            plot_df['Huishouden_Label'] = plot_df['Huishouden'].map(household_labels)
-
-            export_df = plot_df[['Huishouden_Label', 'Gemeentenaam', 'Waarde']].copy()
-            export_df.columns = ['Huishoudtype', 'Gemeente', 'Waarde (€ per maand)']
-            export_df = export_df.sort_values(['Huishoudtype', 'Gemeente'])
-
-            csv_data = export_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Exporteer data als CSV",
-                data=csv_data,
-                file_name=f"huishoudtypen_{selected_income_pct}pct.csv",
-                mime="text/csv"
-            )
-
-        if selected_fr == 1:
-            formeel = "**formele**"
-        elif selected_fr == 2:
-            formeel = "**informele**"
-        elif selected_fr == 3:
-            formeel = ""
-
-        if selected_cav == 0:
-            gemeentepolis = "**buiten beschouwing** gelaten"
-        elif selected_cav == 1:
-            gemeentepolis = "**hierin meegenomen**"
-
-        if selected_referteperiode == 0:
-            reftext = "sinds kort"
-        else:
-            reftext = f"al {selected_referteperiode} jaar"
         
-        st.markdown(f"Schatting van de totale waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waarop een voorbeeldhuishouden recht heeft, dat **{reftext}** een inkomen heeft van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
+        st.markdown(f"Schatting van de totale waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waarop een voorbeeldhuishouden recht heeft, dat **{reftext}** een inkomen heeft van **{sel_ink_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
 
     # ----------------------------------------------------------------------------
     # Graph 2: Income Progression
     # ----------------------------------------------------------------------------
     with tab2:
-        fig_income = create_income_figure(
-            df,
-            selected_huishouden,
-            selected_income_pct,
-            selected_income,
-            selected_referteperiode,
-            selected_cav,
-            selected_fr,
-            selected_gemeente,
-            gemeente_labels,
-            household_labels,
-            key=data_key
+
+        fig_income = inkomensgroepen_grafiek(
+            df, sel_gm, list(gm_lbl.keys()), sel_hh, hh_lbl, sel_ink_pct, sel_refper, sel_cav, sel_fr
         )
 
         st.plotly_chart(fig_income, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
-        # Export data to CSV - only show if ?export=1 in URL
-        if show_export:
-            income_markers_df = get_income_progression_data(
-                df, selected_huishouden, selected_income_pct, selected_referteperiode,
-                selected_cav, selected_fr, key=data_key
-            )
-            income_markers_df['Gemeentenaam'] = income_markers_df['Gemeente'].map(gemeente_labels)
-            income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] * 100).round(0).astype(int).astype(str) + '%'
+        st.markdown(f"Schatting van de totale waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waarop een **{hh_lbl[sel_hh].lower()}** recht heeft, met **{reftext}** een bepaald inkomensniveau. De korting op de gemeentepolis is {gemeentepolis}.")
 
-            export_df = income_markers_df[['Inkomensniveau', 'Gemeentenaam', 'Waarde']].copy()
-            export_df.columns = ['Inkomensniveau', 'Gemeente', 'Waarde (€ per maand)']
-            export_df = export_df.sort_values(['Gemeente', 'Inkomensniveau'])
-
-            csv_data = export_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Exporteer data als CSV",
-                data=csv_data,
-                file_name=f"inkomensgroepen_{household_labels[selected_huishouden].replace(' ', '_')}.csv",
-                mime="text/csv"
-            )
-
-        st.markdown(f"Schatting van de totale waarde (in € per maand) van **alle** {formeel} gemeentelijke regelingen waarop een **{household_labels[selected_huishouden].lower()}** recht heeft, met **{reftext}** een bepaald inkomensniveau. De korting op de gemeentepolis is {gemeentepolis}.")
     # ----------------------------------------------------------------------------
     # Graph 3: Formal vs Informal
     # ----------------------------------------------------------------------------
     with tab3:
-        fig_bar = create_formal_informal_figure(
-            df,
-            selected_huishouden,
-            selected_income,
-            selected_income_pct,
-            selected_referteperiode,
-            selected_cav,
-            selected_gemeente,
-            gemeente_labels,
-            household_labels,
-            key=data_key
+        fig_bar = in_formeel_grafiek(
+            df, sel_gm, list(gm_lbl.keys()), sel_hh, hh_lbl, sel_ink_pct, sel_refper, sel_cav
         )
 
         st.plotly_chart(fig_bar, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
 
-        # Export data to CSV - only show if ?export=1 in URL
-        if show_export:
-            bar_data = get_formal_informal_data(
-                df, selected_huishouden, selected_income, selected_referteperiode,
-                selected_cav, key=data_key
-            )
-            bar_data['Gemeentenaam'] = bar_data['Gemeente'].map(gemeente_labels)
+        st.markdown(f"Schatting van de totale waarde (in € per maand) van zowel de formele als informele gemeentelijke regelingen waarop een **{hh_lbl[sel_hh].lower()}** recht heeft, met **{reftext}** een inkomen van **{sel_ink_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
+    # ----------------------------------------------------------------------------
+    # Graph 4: Population vs Income Threshold
+    # ----------------------------------------------------------------------------
+    with tab4:
 
-            # Melt to long format for export
+        fig_threshold = gem_inkomensgrenzen_grafiek(
+            df, sel_gm, list(gm_lbl.keys()), sel_hh, hh_lbl, sel_refper, sel_cav, sel_fr
+        )
+
+        st.plotly_chart(fig_threshold, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
+
+        st.markdown(f"Schatting van de totale waarde (in € per maand) en de gemiddelde inkomensgrens van **alle** {formeel} gemeentelijke regelingen waarop een **{hh_lbl[sel_hh].lower()}** recht heeft, met **{reftext}** een inkomen van 100% van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
+
+    # ----------------------------------------------------------------------------
+    # Export Buttons (shown below tabs if ?export=1 in URL)
+    # ----------------------------------------------------------------------------
+    if show_export:
+        st.markdown("---")
+        st.subheader("📥 Exporteer data", anchor=False)
+
+        # Create 4 columns for the export buttons
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            # Export 1: Huishoudtypen
+            plot_df = huishoudtypen_data(df, list(gm_lbl.keys()), hh_lbl, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr)
+            export_df = plot_df[['Huishouden_Label', 'Gemeentenaam', 'Waarde']].copy()
+            export_df.columns = ['Huishoudtype', 'Gemeente', 'Waarde (€ per maand)']
+            export_df = export_df.sort_values(['Huishoudtype', 'Gemeente'])
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Huishoudtypen",
+                data=csv_data,
+                file_name=f"huishoudtypen_{sel_ink_pct}pct.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+        with col2:
+            # Export 2: Inkomensgroepen
+            income_markers_df = inkomensgroepen_data(
+                df, list(gm_lbl.keys()), sel_hh, sel_ink_pct, sel_refper, sel_cav, sel_fr
+            )
+            income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] * 100).round(0).astype(int).astype(str) + '%'
+            export_df = income_markers_df[['Inkomensniveau', 'Gemeentenaam', 'Waarde']].copy()
+            export_df.columns = ['Inkomensniveau', 'Gemeente', 'Waarde (€ per maand)']
+            export_df = export_df.sort_values(['Gemeente', 'Inkomensniveau'])
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Inkomensgroepen",
+                data=csv_data,
+                file_name=f"inkomensgroepen_{hh_lbl[sel_hh].replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+        with col3:
+            # Export 3: (In)formeel
+            bar_data = in_formeel_data(
+                df, list(gm_lbl.keys()), sel_hh, sel_ink_pct / 100, sel_refper,
+                sel_cav
+            )
             export_df = bar_data[['Gemeentenaam', 'Formeel', 'Informeel']].melt(
                 id_vars=['Gemeentenaam'],
                 value_vars=['Formeel', 'Informeel'],
@@ -1065,64 +966,41 @@ try:
             )
             export_df.columns = ['Gemeente', 'Type', 'Waarde (€ per maand)']
             export_df = export_df.sort_values(['Type', 'Gemeente'])
-
             csv_data = export_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 Exporteer data als CSV",
+                label="(In)formeel",
                 data=csv_data,
-                file_name=f"formeel_informeel_{household_labels[selected_huishouden].replace(' ', '_')}_{selected_income_pct}pct.csv",
-                mime="text/csv"
+                file_name=f"formeel_informeel_{hh_lbl[sel_hh].replace(' ', '_')}_{sel_ink_pct}pct.csv",
+                mime="text/csv",
+                use_container_width=True
             )
 
-        st.markdown(f"Schatting van de totale waarde (in € per maand) van zowel de formele als informele gemeentelijke regelingen waarop een **{household_labels[selected_huishouden].lower()}** recht heeft, met **{reftext}** een inkomen van **{selected_income_pct}%** van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
-    # ----------------------------------------------------------------------------
-    # Graph 4: Population vs Income Threshold
-    # ----------------------------------------------------------------------------
-    with tab4:
-        fig_threshold = create_threshold_figure(
-            df,
-            selected_huishouden,
-            selected_referteperiode,
-            selected_cav,
-            selected_fr,
-            selected_gemeente,
-            gemeente_labels,
-            household_labels,
-            key=data_key
-        )
-
-        st.plotly_chart(fig_threshold, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
-
-        # Export data to CSV - only show if ?export=1 in URL
-        if show_export:
-            threshold_data = get_threshold_data(
-                df, selected_huishouden, selected_referteperiode, selected_cav,
-                selected_fr, key=data_key
+        with col4:
+            # Export 4: Inkomensgrenzen
+            threshold_data = gem_inkomensgrenzen_data(
+                df, list(gm_lbl.keys()), sel_hh, sel_refper, sel_cav,
+                sel_fr
             )
-            threshold_data['Gemeentenaam'] = threshold_data['Gemeente'].map(gemeente_labels)
             threshold_data['Inkomensgrens_Pct'] = (threshold_data['Inkomensgrens'] * 100).round(0).astype(int)
-
             export_df = threshold_data[['Gemeentenaam', 'Inkomensgrens_Pct', 'Waarde', 'Inwoners']].copy()
             export_df.columns = ['Gemeente', 'Gewogen gemiddelde inkomensgrens (%)', 'Waarde bij 100% (€ per maand)', 'Inwoners']
             export_df = export_df.sort_values('Gemeente')
-
             csv_data = export_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 Exporteer data als CSV",
+                label="Inkomensgrenzen",
                 data=csv_data,
-                file_name=f"waarden_inkomensgrenzen_{household_labels[selected_huishouden].replace(' ', '_')}.csv",
-                mime="text/csv"
+                file_name=f"waarden_inkomensgrenzen_{hh_lbl[sel_hh].replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True
             )
 
-        st.markdown(f"Schatting van de totale waarde (in € per maand) en de gemiddelde inkomensgrens van **alle** {formeel} gemeentelijke regelingen waarop een **{household_labels[selected_huishouden].lower()}** recht heeft, met **{reftext}** een inkomen van 100% van het sociaal minimum. De korting op de gemeentepolis is {gemeentepolis}.")
     # ----------------------------------------------------------------------------
     # Regulations Table (shown on the right side)
     # ----------------------------------------------------------------------------
     with table_col:
         # Get table data with all regulations (matching and non-matching)
         display_df = regelingen_lijst(
-            df, selected_gemeente, selected_huishouden,
-            selected_income, selected_referteperiode, selected_cav, selected_fr
+            df, sel_gm, sel_hh, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr
         )
 
         if not display_df.empty:
@@ -1188,7 +1066,7 @@ try:
                 total_waarde = matching_df['Waarde'].sum() if not matching_df.empty else 0
                 total_waarde_formatted = format_dutch_currency(total_waarde, decimals=0)
 
-                st.markdown(f"Bovenstaande {formeel} regelingen voor een **{household_labels[selected_huishouden].lower()}** in **{gemeente_labels[selected_gemeente]}** met **{reftext}** een inkomen van **{selected_income_pct}%** van het sociaal minimum tellen op tot **{total_waarde_formatted}** per maand.", unsafe_allow_html=True)
+                st.markdown(f"Bovenstaande {formeel} regelingen voor een **{hh_lbl[sel_hh].lower()}** in **{gm_lbl[sel_gm]}** met **{reftext}** een inkomen van **{sel_ink_pct}%** van het sociaal minimum tellen op tot **{total_waarde_formatted}** per maand.", unsafe_allow_html=True)
             
             else:
                 st.info("Let op! Geen passende regelingen gevonden.")
@@ -1225,11 +1103,11 @@ try:
             else:
                 st.info("Geen overige regelingen gevonden.")
         else:
-            st.info(f"Geen regelingen gevonden voor {gemeente_labels[selected_gemeente]}")
+            st.info(f"Geen regelingen gevonden voor {gm_lbl[sel_gm]}")
 
 except FileNotFoundError:
-    st.error("Databestand 'dataoverzicht_dashboard_armoedebeleid.xlsx' niet gevonden.")
+    st.error("Parquet databestand niet gevonden.")
 except Exception as e:
-    import traceback
+    #import traceback
     st.error(f"Er is een fout opgetreden: {type(e).__name__}: {str(e)}")
-    st.code(traceback.format_exc())
+    #st.code(traceback.format_exc())
