@@ -175,16 +175,7 @@ def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
 
         results.append(hh_data[['GMcode', 'Gemeentenaam', 'Waarde', 'Huishouden']])
 
-    huishoudtypen_df = pd.concat(results, ignore_index=True)
-
-    # Add hover text for all data
-    huishoudtypen_df['hover_text'] = (
-        "<b>" + huishoudtypen_df['Gemeentenaam'].astype(str) + "</b><br>" +
-        f"{int(ink * 100)}% sociaal minimum<br>Waarde: " +
-        huishoudtypen_df['Waarde'].apply(format_dutch_currency).astype(str)
-    )
-
-    return huishoudtypen_df
+    return pd.concat(results, ignore_index=True)
 
 def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
     """Create box plot figure for household comparison (Graph 1)."""
@@ -192,6 +183,12 @@ def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr
     # Get data
     huishoudtypen_df = huishoudtypen_data(df, gm_lbl, hh_lbl, ink, refper, cav, fr)
 
+    # Add hover text for all data
+    huishoudtypen_df['hover_text'] = (
+        "<b>" + huishoudtypen_df['Gemeentenaam'].astype(str) + "</b><br>" +
+        f"{int(ink * 100)}% sociaal minimum<br>Waarde: " +
+        huishoudtypen_df['Waarde'].apply(format_dutch_currency).astype(str)
+    )
 
     # Create multi-line x-axis labels with specific breaks
     label_mapping = {
@@ -309,16 +306,7 @@ def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
 
         results.append(ink_data[['GMcode', 'Gemeentenaam', 'Waarde', 'Inkomen']])
 
-    inkomensgroepen_df = pd.concat(results, ignore_index=True)
-
-    # Create hover text for all municipalities
-    inkomensgroepen_df['hover_text'] = (
-        "<b>" + inkomensgroepen_df['Gemeentenaam'].astype(str) + "</b><br>" +
-        hh_lbl[hh] + "<br>Waarde: " +
-        inkomensgroepen_df['Waarde'].apply(format_dutch_currency).astype(str)
-    )
-
-    return inkomensgroepen_df
+    return pd.concat(results, ignore_index=True)
 
 @st.cache_data
 def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
@@ -347,6 +335,13 @@ def inkomensgroepen_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=
 
     # Extract income levels from data for x-axis ticks
     income_levels_to_show = sorted(inkomensgroepen_df['Inkomen'].unique())
+
+    # Create hover text for all municipalities
+    inkomensgroepen_df['hover_text'] = (
+        "<b>" + inkomensgroepen_df['Gemeentenaam'].astype(str) + "</b><br>" +
+        hh_lbl[hh] + "<br>Waarde: " +
+        inkomensgroepen_df['Waarde'].apply(format_dutch_currency).astype(str)
+    )
 
     # Add visual properties based on whether municipality is selected
     is_selected = inkomensgroepen_df['GMcode'] == sel_gm
