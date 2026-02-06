@@ -150,207 +150,74 @@ def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
     })
 
 # ================================================================================
-# DATA FUNCTIONS FOR GRAPHS AND TABLE
+# FUNCTIONS FOR GRAPH 1
 # ================================================================================
-def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
-    # Get all regulations for this municipality
-    regs = df[df['GMcode'] == gm].copy()
 
-    # Get regulation IDs that meet user input criteria
-    selected_regs = filter_regelingen(df, gm, hh, ink, refper, cav, fr)
-
-    # Add computed columns
-    regs['Regeling'] = regs['N4']
-    regs['Waarde'] = regs[f'WRD_{hh}'] / 12
-    regs['Inkomensgrens'] = regs[f'IG_{hh}']
-    regs['Matches'] = regs['ID'].isin(selected_regs['ID'])
-
-    # Group and aggregate
-    grouped = regs.groupby(['Regeling', 'Matches'], as_index=False).agg({
-        'Waarde': 'sum',
-        'Inkomensgrens': 'min'
-    })
-
-    # Sort and combine: matching by value (desc), non-matching alphabetically
-    matching = grouped[grouped['Matches']].sort_values('Waarde', ascending=False)
-    non_matching = grouped[~grouped['Matches']].sort_values('Regeling')
-
-    return pd.concat([matching, non_matching])
-
-
-def huishoudtypen_data(df, gm, hh_lbl, ink=1, refper=0, cav=0, fr=3):
+def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
     """Calculate values for all municipalities and all household types (Graph 1)."""
     results = []
-
+    
     for hh in hh_lbl.keys():
-        filtered_df = filter_regelingen(df, gm, hh, ink, refper, cav, fr)
+        # Filter and calculate values and reindex to include all municipalities
+        filtered_df = (
+            filter_regelingen(df, gm_lbl.keys(), hh, ink, refper, cav, fr)
+            .groupby('GMcode')['WRD'].sum().div(12)
+            .reindex(gm_lbl.keys(), fill_value=0.0)
+        )
 
-        hh_data = filtered_df.groupby('GMcode').agg({
-            'WRD': 'sum',
-            'Gemeentenaam': 'first'
-        }).reset_index()
-
-        hh_data = hh_data.rename(columns={'GMcode': 'Gemeente'})
-        hh_data['Waarde'] = hh_data['WRD'] / 12
-        hh_data['Huishouden'] = hh
-        hh_data['Huishouden_Label'] = hh_lbl[hh]
-
-        results.append(hh_data[['Gemeente', 'Gemeentenaam', 'Waarde', 'Huishouden', 'Huishouden_Label']])
-
-    return pd.concat(results, ignore_index=True)
-
-
-def inkomensgroepen_data(df, gm, hh, ink_pct=100, refper=0, cav=0, fr=3):
-    """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
-    # Get gemeente lookup for filling reindexed rows
-    gem_lookup = df[['GMcode', 'Gemeentenaam']].drop_duplicates().set_index('GMcode')['Gemeentenaam']
-
-    # Calculate income levels to show based on selected income percentage (100-200)
-    # Show 6 levels in steps of 10, centered around selected income (start 20 below)
-    final_digit = ink_pct % 10  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
-    start = ink_pct - 20
-    start = max(100 + final_digit, min(140 + final_digit, start))  # Clamp to 100-200 range
-    income_levels_to_show = [level for level in range(start, start + 60, 10)]
-
-    results = []
-
-    for ink_lvl in income_levels_to_show:
-        filtered_df = filter_regelingen(df, gm, hh, round(ink_lvl / 100, 2), refper, cav, fr)
-
-        if len(filtered_df) > 0:
-            ink_data = filtered_df.groupby('GMcode').agg({
-                'WRD': 'sum',
-                'Gemeentenaam': 'first'
-            })
-            ink_data['Waarde'] = ink_data['WRD'] / 12
-            ink_data = ink_data.reindex(gm, fill_value=0)
-            # Fill missing Gemeentenaam for reindexed rows
-            ink_data['Gemeentenaam'] = ink_data['Gemeentenaam'].fillna(gem_lookup)
-        else:
-            # No data for this income level, create empty structure with gemeente names
-            ink_data = pd.DataFrame(index=gm)
-            ink_data.index.name = 'GMcode'  # Set index name for consistency
-            ink_data['WRD'] = 0
-            ink_data['Waarde'] = 0
-            ink_data['Gemeentenaam'] = gem_lookup.reindex(gm)
-
-        ink_data = ink_data.reset_index()
-        ink_data = ink_data.rename(columns={'GMcode': 'Gemeente'})
-        ink_data['Inkomen'] = ink_lvl
-        results.append(ink_data[['Gemeente', 'Gemeentenaam', 'Waarde', 'Inkomen']])
-
-    return pd.concat(results, ignore_index=True)
-
-
-@st.cache_data
-def get_income_line_data(_df, gm, hh, refper=0, cav=0, fr=3):
-    """Calculate values for selected municipality at all income levels (Graph 2 line)."""
-    all_income_levels_pct = range(100, 201)
-    results = []
-    for income_pct in all_income_levels_pct:
-        filtered_df = filter_regelingen(_df, gm, hh, income_pct / 100, refper, cav, fr)
-
-        results.append({
-            'Inkomen': income_pct,  # Store as percentage (integer)
-            'Waarde': filtered_df['WRD'].sum() / 12
+        # Create dataframe
+        hh_data = pd.DataFrame({
+            'GMcode': gm_lbl.keys(),
+            'Gemeentenaam': gm_lbl.values(),
+            'Waarde': filtered_df.values,
+            'Huishouden': hh
         })
 
-    return pd.DataFrame(results)
+        results.append(hh_data[['GMcode', 'Gemeentenaam', 'Waarde', 'Huishouden']])
 
+    huishoudtypen_df = pd.concat(results, ignore_index=True)
 
-def in_formeel_data(df, gm, hh, ink=1, refper=0, cav=0):
-    """Calculate formal and informal values for all municipalities (Graph 3)."""
-    # Get gemeente lookup for filling reindexed rows
-    gem_lookup = df[['GMcode', 'Gemeentenaam']].drop_duplicates().set_index('GMcode')['Gemeentenaam']
-
-    filtered_df = filter_regelingen(df, gm, hh, ink, refper, cav)
-
-    # Group and aggregate WRD and Gemeentenaam
-    agg_data = filtered_df.groupby(['GMcode', 'FR']).agg({
-        'WRD': 'sum',
-        'Gemeentenaam': 'first'
-    })
-
-    # Unstack FR to get Formeel/Informeel columns
-    wrd_unstacked = agg_data['WRD'].unstack('FR', fill_value=0).div(12)
-    gem_names = agg_data['Gemeentenaam'].groupby('GMcode').first()
-
-    # Rename columns
-    wrd_unstacked = wrd_unstacked.rename(columns={'Ja': 'Formeel', 'Nee': 'Informeel'})
-
-    # Ensure both columns exist
-    for col in ['Formeel', 'Informeel']:
-        if col not in wrd_unstacked.columns:
-            wrd_unstacked[col] = 0
-
-    # Reindex and add Gemeentenaam
-    wrd_unstacked = wrd_unstacked.reindex(gm, fill_value=0)
-    wrd_unstacked['Gemeentenaam'] = gem_names.reindex(wrd_unstacked.index).fillna(gem_lookup)
-
-    # Reset index and rename
-    grouped = wrd_unstacked.reset_index().rename(columns={'GMcode': 'Gemeente'})
-    grouped['Totaal'] = grouped['Formeel'] + grouped['Informeel']
-
-    return grouped[['Gemeente', 'Gemeentenaam', 'Formeel', 'Informeel', 'Totaal']]
-
-
-def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
-    """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
-    # Filter once for all municipalities (instead of once per municipality)
-    filtered_df = filter_regelingen(df, gm, hh, 1, refper, cav, fr)
-
-    # Add calculated columns
-    filtered_df = filtered_df.assign(
-        monthly_wrd=filtered_df['WRD'] / 12,
-        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / 12
+    # Add hover text for all data
+    huishoudtypen_df['hover_text'] = (
+        "<b>" + huishoudtypen_df['Gemeentenaam'].astype(str) + "</b><br>" +
+        f"{int(ink * 100)}% sociaal minimum<br>Waarde: " +
+        huishoudtypen_df['Waarde'].apply(format_dutch_currency).astype(str)
     )
 
-    # Group by municipality and aggregate
-    result = filtered_df.groupby('GMcode').agg({
-        'monthly_wrd': 'sum',
-        'weighted_component': 'sum',
-        'Inwoners': 'first',
-        'Gemeentenaam': 'first'
-    }).reset_index()
+    return huishoudtypen_df
 
-    result.columns = ['Gemeente', 'Waarde', 'weighted_sum', 'Inwoners', 'Gemeentenaam']
-
-    # Filter out zero values and calculate income threshold
-    result['Inkomensgrens'] = ((1 + (result['weighted_sum'] / result['Waarde']))*100).astype(int)
-
-    return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
-
-# ================================================================================
-# FIGURE FUNCTIONS
-# ================================================================================
-
-def huishoudtypen_grafiek(df, sel_gm, all_gm, hh_lbl, ink=1, refper=0, cav=0, fr=3):
+def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
     """Create box plot figure for household comparison (Graph 1)."""
 
     # Get data
-    plot_df = huishoudtypen_data(df, all_gm, hh_lbl, ink, refper, cav, fr)
+    huishoudtypen_df = huishoudtypen_data(df, gm_lbl, hh_lbl, ink, refper, cav, fr)
 
-    # Add hover text for all data (before splitting)
-    plot_df['hover_text'] = (
-        "<b>" + plot_df['Gemeentenaam'].astype(str) + "</b><br>" +
-        f"{int(ink * 100)}% sociaal minimum<br>Waarde: " +
-        plot_df['Waarde'].apply(format_dutch_currency).astype(str)
-    )
 
-    fig = go.Figure()
+    # Create multi-line x-axis labels with specific breaks
+    label_mapping = {
+        'Alleenstaande': 'Alleenstaande',
+        'Alleenstaande ouder met kind': 'Alleenstaande<br>ouder met kind',
+        'Paar': 'Paar',
+        'Paar met twee kinderen': 'Paar met<br>twee kinderen'
+    }
+    hh_labels = list(hh_lbl.values())
+    x_labels = [label_mapping.get(label, label) for label in hh_labels]
+
+    huishoudtypen_fig = go.Figure()
+
     for hh_code, hh_label in hh_lbl.items():
-        household_data = plot_df[plot_df['Huishouden'] == hh_code]
+        household_data = huishoudtypen_df[huishoudtypen_df['Huishouden'] == hh_code]
 
         # Create both traces with their specific styling (Box plots need separate traces for different colors)
         trace_configs = [
-            {'data': household_data[household_data['Gemeente'] != sel_gm], 'size': 8, 'color': COLOR_OTHER, 'opacity': 0.6},
-            {'data': household_data[household_data['Gemeente'] == sel_gm], 'size': 10, 'color': COLOR_SELECTED, 'opacity': 1.0}
+            {'data': household_data[household_data['GMcode'] != sel_gm], 'size': 8, 'color': COLOR_OTHER, 'opacity': 0.6},
+            {'data': household_data[household_data['GMcode'] == sel_gm], 'size': 10, 'color': COLOR_SELECTED, 'opacity': 1.0}
         ]
 
         for config in trace_configs:
             data = config['data']
             if len(data) > 0:
-                fig.add_trace(go.Box(
+                huishoudtypen_fig.add_trace(go.Box(
                     x=[hh_label] * len(data),
                     y=data['Waarde'],
                     name=hh_label,
@@ -364,17 +231,17 @@ def huishoudtypen_grafiek(df, sel_gm, all_gm, hh_lbl, ink=1, refper=0, cav=0, fr
                     ),
                     hovertext=data['hover_text'],
                     hoverinfo='text',
-                    customdata=data['Gemeente'].values,
+                    customdata=data['GMcode'].values,
                     showlegend=False,
                     fillcolor='rgba(255,255,255,0)',
                     line=dict(color='rgba(255,255,255,0)')
                 ))
 
     # Add value annotations for selected municipality
-    selected_municipality_data = plot_df[plot_df['Gemeente'] == sel_gm]
+    selected_municipality_data = huishoudtypen_df[huishoudtypen_df['GMcode'] == sel_gm]
     for _, row in selected_municipality_data.iterrows():
-        fig.add_annotation(
-            x=row['Huishouden_Label'],
+        huishoudtypen_fig.add_annotation(
+            x=hh_lbl[row['Huishouden']],
             y=row['Waarde'],
             text=format_dutch_currency(row['Waarde']),
             showarrow=False,
@@ -384,17 +251,7 @@ def huishoudtypen_grafiek(df, sel_gm, all_gm, hh_lbl, ink=1, refper=0, cav=0, fr
             font=dict(size=14, color='black')
         )
 
-    # Create multi-line x-axis labels with specific breaks
-    label_mapping = {
-        'Alleenstaande': 'Alleenstaande',
-        'Alleenstaande ouder met kind': 'Alleenstaande<br>ouder met kind',
-        'Paar': 'Paar',
-        'Paar met twee kinderen': 'Paar met<br>twee kinderen'
-    }
-    hh_labels = list(hh_lbl.values())
-    x_labels = [label_mapping.get(label, label) for label in hh_labels]
-
-    fig.update_layout(
+    huishoudtypen_fig.update_layout(
         xaxis_title="",
         yaxis_title="",
         height=450,
@@ -417,20 +274,42 @@ def huishoudtypen_grafiek(df, sel_gm, all_gm, hh_lbl, ink=1, refper=0, cav=0, fr
         )
     )
 
-    return fig
+    return huishoudtypen_fig
 
 
-def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=0, cav=0, fr=3):
-    """Create line chart figure for income progression (Graph 2)."""
-    fig_income = go.Figure()
+# ================================================================================
+# FUNCTIONS FOR GRAPH 2
+# ================================================================================
 
-    # Get cached data for all municipalities at specific income levels
-    inkomensgroepen_df = inkomensgroepen_data(
-        df, all_gm, hh, ink_pct, refper, cav, fr
-    )
+def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
+    """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
+    # Calculate income levels to show based on selected income percentage (100-200)
+    # Show 6 levels in steps of 10, centered around selected income (start 20 below)
+    final_digit = ink_pct % 10  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
+    start = ink_pct - 20
+    start = max(100 + final_digit, min(140 + final_digit, start))  # Clamp to 100-200 range
+    income_levels_to_show = [level for level in range(start, start + 60, 10)]
 
-    # Extract income levels from data for x-axis ticks
-    income_levels_to_show = sorted(inkomensgroepen_df['Inkomen'].unique())
+    results = []
+
+    for ink_lvl in income_levels_to_show:
+        # Filter and calculate values and reindex to include all municipalities
+        filtered_df = (
+            filter_regelingen(df, gm_lbl.keys(), hh, round(ink_lvl / 100, 2), refper, cav, fr)
+            .groupby('GMcode')['WRD'].sum().div(12)
+            .reindex(gm_lbl.keys(), fill_value=0.0))
+
+        # Create dataframe
+        ink_data = pd.DataFrame({
+            'GMcode': gm_lbl.keys(),
+            'Gemeentenaam': gm_lbl.values(),
+            'Waarde': filtered_df.values,
+            'Inkomen': ink_lvl
+        })
+
+        results.append(ink_data[['GMcode', 'Gemeentenaam', 'Waarde', 'Inkomen']])
+
+    inkomensgroepen_df = pd.concat(results, ignore_index=True)
 
     # Create hover text for all municipalities
     inkomensgroepen_df['hover_text'] = (
@@ -439,13 +318,43 @@ def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=
         inkomensgroepen_df['Waarde'].apply(format_dutch_currency).astype(str)
     )
 
+    return inkomensgroepen_df
+
+@st.cache_data
+def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
+    """Calculate values for selected municipality at all income levels (Graph 2 line)."""
+    all_income_levels_pct = range(100, 201)
+    results = []
+    for income_pct in all_income_levels_pct:
+        filtered_df = filter_regelingen(_df, gm, hh, income_pct / 100, refper, cav, fr)
+
+        results.append({
+            'Inkomen': income_pct,  # Store as percentage (integer)
+            'Waarde': filtered_df['WRD'].sum() / 12
+        })
+
+    return pd.DataFrame(results)
+
+
+def inkomensgroepen_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
+    """Create line chart figure for income progression (Graph 2)."""
+    inkomensgroepen_fig = go.Figure()
+
+    # Get cached data for all municipalities at specific income levels
+    inkomensgroepen_df = inkomensgroepen_data(
+        df, hh, gm_lbl, ink_pct, refper, cav, fr
+    )
+
+    # Extract income levels from data for x-axis ticks
+    income_levels_to_show = sorted(inkomensgroepen_df['Inkomen'].unique())
+
     # Add visual properties based on whether municipality is selected
-    is_selected = inkomensgroepen_df['Gemeente'] == sel_gm
+    is_selected = inkomensgroepen_df['GMcode'] == sel_gm
     inkomensgroepen_df['marker_color'] = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER})
     inkomensgroepen_df['marker_size'] = is_selected.map({True: 10, False: 8})
     inkomensgroepen_df['marker_opacity'] = is_selected.map({True: 1.0, False: 0.6})
 
-    fig_income.add_trace(go.Scatter(
+    inkomensgroepen_fig.add_trace(go.Scatter(
         x=inkomensgroepen_df['Inkomen'],
         y=inkomensgroepen_df['Waarde'],
         mode='markers',
@@ -461,11 +370,11 @@ def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=
     ))
 
     # Get cached line data for selected municipality
-    selected_all_df = get_income_line_data(
+    selected_all_df = inkomenslijn_data(
         df, sel_gm, hh, refper, cav, fr
     )
 
-    fig_income.add_trace(go.Scatter(
+    inkomensgroepen_fig.add_trace(go.Scatter(
         x=selected_all_df['Inkomen'],
         y=selected_all_df['Waarde'],
         mode='lines',
@@ -479,7 +388,7 @@ def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=
 
     # Add label for the selected income level
     value = selected_all_df.loc[selected_all_df['Inkomen'] == ink_pct]['Waarde'].squeeze()
-    fig_income.add_annotation(
+    inkomensgroepen_fig.add_annotation(
         x=ink_pct,
         y=value,
         text=format_dutch_currency(value),
@@ -494,7 +403,7 @@ def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=
     tick_vals = income_levels_to_show
     tick_text = [f'{val}%' for val in tick_vals]
 
-    fig_income.update_layout(
+    inkomensgroepen_fig.update_layout(
         xaxis_title="Inkomen (% van sociaal minimum)",
         yaxis_title="",
         height=450,
@@ -516,18 +425,51 @@ def inkomensgroepen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=
         )
     )
 
-    return fig_income
+    return inkomensgroepen_fig
 
 
-def in_formeel_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=0, cav=0):
+# ================================================================================
+# FUNCTIONS FOR GRAPH 3
+# ================================================================================
+
+def in_formeel_data(df, hh, gm_lbl, ink=1, refper=0, cav=0):
+    """Calculate formal and informal values for all municipalities (Graph 3)."""
+    # Group and aggregate WRD only (no need to aggregate Gemeentenaam)
+    filtered_df = (
+        filter_regelingen(df, gm_lbl.keys(), hh, ink, refper, cav)
+        .groupby(['GMcode', 'FR'])['WRD'].sum().div(12)
+    )
+
+    # Unstack FR to get Formeel/Informeel columns
+    wrd_unstacked = filtered_df.unstack('FR', fill_value=0)
+
+    # Rename columns
+    wrd_unstacked = wrd_unstacked.rename(columns={'Ja': 'Formeel', 'Nee': 'Informeel'})
+
+    # Ensure both columns exist
+    for col in ['Formeel', 'Informeel']:
+        if col not in wrd_unstacked.columns:
+            wrd_unstacked[col] = 0
+
+    # Reindex to include all municipalities and add gemeentenaam directly from gm_lbl
+    wrd_unstacked = wrd_unstacked.reindex(gm_lbl.keys(), fill_value=0)
+    wrd_unstacked['Gemeentenaam'] = gm_lbl.values()
+    wrd_unstacked['Totaal'] = wrd_unstacked['Formeel'] + wrd_unstacked['Informeel']
+
+    # Reset index
+    result = wrd_unstacked.reset_index()
+
+    return result[['GMcode', 'Gemeentenaam', 'Formeel', 'Informeel', 'Totaal']]
+
+def in_formeel_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, cav=0):
     """Create stacked bar chart for formal vs informal regulations (Graph 3)."""
     # Get cached formal/informal data
     bar_data = in_formeel_data(
-        df, all_gm, hh, ink_pct / 100, refper, cav
+        df, hh, gm_lbl, ink_pct / 100, refper, cav
     ).sort_values('Formeel', ascending=False)
 
     # Add visual properties and hover text to dataframe
-    is_selected = bar_data['Gemeente'] == sel_gm
+    is_selected = bar_data['GMcode'] == sel_gm
     bar_data['color_formal'] = is_selected.map({True: COLOR_SELECTED, False: COLOR_OTHER})
     bar_data['color_informal'] = is_selected.map({True: COLOR_INFORMAL_SELECTED, False: COLOR_INFORMAL_OTHER})
 
@@ -572,6 +514,36 @@ def in_formeel_grafiek(df, sel_gm, all_gm, hh, hh_lbl, ink_pct=100, refper=0, ca
 
     return fig_bar
 
+
+# ================================================================================
+# FUNCTIONS FOR GRAPH 4
+# ================================================================================
+
+def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
+    """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
+    # Filter once for all municipalities (instead of once per municipality)
+    filtered_df = filter_regelingen(df, gm, hh, 1, refper, cav, fr)
+
+    # Add calculated columns
+    filtered_df = filtered_df.assign(
+        monthly_wrd=filtered_df['WRD'] / 12,
+        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / 12
+    )
+
+    # Group by municipality and aggregate
+    result = filtered_df.groupby('GMcode').agg({
+        'monthly_wrd': 'sum',
+        'weighted_component': 'sum',
+        'Inwoners': 'first',
+        'Gemeentenaam': 'first'
+    }).reset_index()
+
+    result.columns = ['Gemeente', 'Waarde', 'weighted_sum', 'Inwoners', 'Gemeentenaam']
+
+    # Filter out zero values and calculate income threshold
+    result['Inkomensgrens'] = ((1 + (result['weighted_sum'] / result['Waarde']))*100).astype(int)
+
+    return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
 
 def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0, fr=3):
     """Create scatter plot for value vs income threshold (Graph 4)."""
@@ -651,6 +623,37 @@ def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0,
     )
 
     return fig_threshold
+
+
+# ================================================================================
+# FUNCTIONS FOR TABLES
+# ================================================================================
+
+def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
+    # Get all regulations for this municipality
+    regs = df[df['GMcode'] == gm].copy()
+
+    # Get regulation IDs that meet user input criteria
+    selected_regs = filter_regelingen(df, gm, hh, ink, refper, cav, fr)
+
+    # Add computed columns
+    regs['Regeling'] = regs['N4']
+    regs['Waarde'] = regs[f'WRD_{hh}'] / 12
+    regs['Inkomensgrens'] = regs[f'IG_{hh}']
+    regs['Matches'] = regs['ID'].isin(selected_regs['ID'])
+
+    # Group and aggregate
+    grouped = regs.groupby(['Regeling', 'Matches'], as_index=False).agg({
+        'Waarde': 'sum',
+        'Inkomensgrens': 'min'
+    })
+
+    # Sort and combine: matching by value (desc), non-matching alphabetically
+    matching = grouped[grouped['Matches']].sort_values('Waarde', ascending=False)
+    non_matching = grouped[~grouped['Matches']].sort_values('Regeling')
+
+    return pd.concat([matching, non_matching])
+
 
 # ================================================================================
 # MAIN APPLICATION
@@ -810,6 +813,7 @@ try:
         </div>
         """, unsafe_allow_html=True)
 
+
     # Update URL with current selections (preserving the key parameter)
     # Only update if params actually changed to prevent unnecessary reruns
     new_params = {"key": params.get("key", "")} if params.get("key") else {}
@@ -832,6 +836,24 @@ try:
     # Check if export buttons should be shown (only if ?export=1 in URL)
     show_export = st.query_params.get("export") == "1"
 
+    # make specific text inserts based on current selections
+    if sel_fr == 1:
+        formeel = "**formele**"
+    elif sel_fr == 2:
+        formeel = "**informele**"
+    elif sel_fr == 3:
+        formeel = ""
+
+    if sel_cav == 0:
+        gemeentepolis = "**buiten beschouwing** gelaten"
+    elif sel_cav == 1:
+        gemeentepolis = "**hierin meegenomen**"
+
+    if sel_refper == 0:
+        reftext = "sinds kort"
+    else:
+        reftext = f"al {sel_refper} jaar"
+
     with graph_col:
         # Create tabs for the graphs
         tab1, tab2, tab3, tab4 = st.tabs([
@@ -841,31 +863,12 @@ try:
             "Gemiddelde inkomensgrenzen"
         ])
 
-
-        if sel_fr == 1:
-            formeel = "**formele**"
-        elif sel_fr == 2:
-            formeel = "**informele**"
-        elif sel_fr == 3:
-            formeel = ""
-
-        if sel_cav == 0:
-            gemeentepolis = "**buiten beschouwing** gelaten"
-        elif sel_cav == 1:
-            gemeentepolis = "**hierin meegenomen**"
-
-        if sel_refper == 0:
-            reftext = "sinds kort"
-        else:
-            reftext = f"al {sel_refper} jaar"
-
-
     # ----------------------------------------------------------------------------
     # Graph 1: Box Plot - Value by Household Type
     # ----------------------------------------------------------------------------
     with tab1:
         fig = huishoudtypen_grafiek(
-            df, sel_gm, list(gm_lbl.keys()), hh_lbl, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr
+            df, sel_gm, gm_lbl, hh_lbl, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr
         )
 
         st.plotly_chart(fig, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
@@ -878,7 +881,7 @@ try:
     with tab2:
 
         fig_income = inkomensgroepen_grafiek(
-            df, sel_gm, list(gm_lbl.keys()), sel_hh, hh_lbl, sel_ink_pct, sel_refper, sel_cav, sel_fr
+            df, sel_gm, sel_hh, hh_lbl, gm_lbl, sel_ink_pct, sel_refper, sel_cav, sel_fr
         )
 
         st.plotly_chart(fig_income, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
@@ -890,7 +893,7 @@ try:
     # ----------------------------------------------------------------------------
     with tab3:
         fig_bar = in_formeel_grafiek(
-            df, sel_gm, list(gm_lbl.keys()), sel_hh, hh_lbl, sel_ink_pct, sel_refper, sel_cav
+            df, sel_gm, sel_hh, hh_lbl, gm_lbl, sel_ink_pct, sel_refper, sel_cav
         )
 
         st.plotly_chart(fig_bar, width='stretch', config={'displayModeBar': False, 'scrollZoom': False})
@@ -921,8 +924,10 @@ try:
 
         with col1:
             # Export 1: Huishoudtypen
-            plot_df = huishoudtypen_data(df, list(gm_lbl.keys()), hh_lbl, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr)
-            export_df = plot_df[['Huishouden_Label', 'Gemeentenaam', 'Waarde']].copy()
+            plot_df = huishoudtypen_data(df, gm_lbl, hh_lbl, sel_ink_pct / 100, sel_refper, sel_cav, sel_fr)
+            export_df = plot_df[['Huishouden', 'Gemeentenaam', 'Waarde']].copy()
+            export_df['Huishoudtype'] = export_df['Huishouden'].map(hh_lbl)
+            export_df = export_df[['Huishoudtype', 'Gemeentenaam', 'Waarde']]
             export_df.columns = ['Huishoudtype', 'Gemeente', 'Waarde (€ per maand)']
             export_df = export_df.sort_values(['Huishoudtype', 'Gemeente'])
             csv_data = export_df.to_csv(index=False).encode('utf-8')
@@ -937,7 +942,7 @@ try:
         with col2:
             # Export 2: Inkomensgroepen
             income_markers_df = inkomensgroepen_data(
-                df, list(gm_lbl.keys()), sel_hh, sel_ink_pct, sel_refper, sel_cav, sel_fr
+                df, sel_hh, gm_lbl, sel_ink_pct, sel_refper, sel_cav, sel_fr
             )
             income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] * 100).round(0).astype(int).astype(str) + '%'
             export_df = income_markers_df[['Inkomensniveau', 'Gemeentenaam', 'Waarde']].copy()
@@ -955,8 +960,7 @@ try:
         with col3:
             # Export 3: (In)formeel
             bar_data = in_formeel_data(
-                df, list(gm_lbl.keys()), sel_hh, sel_ink_pct / 100, sel_refper,
-                sel_cav
+                df, sel_hh, gm_lbl, sel_ink_pct / 100, sel_refper, sel_cav
             )
             export_df = bar_data[['Gemeentenaam', 'Formeel', 'Informeel']].melt(
                 id_vars=['Gemeentenaam'],
