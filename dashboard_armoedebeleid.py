@@ -154,7 +154,11 @@ def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
 # ================================================================================
 
 def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
-    """Calculate values for all municipalities and all household types (Graph 1)."""
+    """Calculate values for all municipalities and all household types (Graph 1).
+
+    Note: each household type filters on different columns (WRD_HH01, IG_HH01, etc.),
+    so the four filter calls cannot be batched into a single pass.
+    """
     results = []
     
     for hh in hh_lbl.keys():
@@ -228,7 +232,6 @@ def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr
                     ),
                     hovertext=data['hover_text'],
                     hoverinfo='text',
-                    customdata=data['GMcode'].values,
                     showlegend=False,
                     fillcolor='rgba(255,255,255,0)',
                     line=dict(color='rgba(255,255,255,0)')
