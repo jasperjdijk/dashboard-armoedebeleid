@@ -19,6 +19,15 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # ================================================================================
+# CONSTANTS
+# ================================================================================
+MONTHS_PER_YEAR = 12                # Annual-to-monthly conversion
+INCOME_LEVELS_COUNT = 6             # Number of income levels shown as markers (Graph 2)
+INCOME_LEVEL_STEP = 10              # Step between income levels in percentage points
+INCOME_LEVEL_OFFSET = 20            # Offset below selected income to start
+BUBBLE_SIZE_DIVISOR = 200           # Divides population to get marker area (Graph 4)
+
+# ================================================================================
 # PAGE CONFIGURATION
 # ================================================================================
 st.set_page_config(
@@ -165,7 +174,7 @@ def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
         # Filter and calculate values and reindex to include all municipalities
         filtered_df = (
             filter_regelingen(df, gm_lbl.keys(), hh, ink, refper, cav, fr)
-            .groupby('GMcode')['WRD'].sum().div(12)
+            .groupby('GMcode')['WRD'].sum().div(MONTHS_PER_YEAR)
             .reindex(gm_lbl.keys(), fill_value=0.0)
         )
 
@@ -284,11 +293,12 @@ def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr
 def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
     """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
     # Calculate income levels to show based on selected income percentage (100-200)
-    # Show 6 levels in steps of 10, centered around selected income (start 20 below)
-    final_digit = ink_pct % 10  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
-    start = ink_pct - 20
-    start = max(100 + final_digit, min(140 + final_digit, start))  # Clamp to 100-200 range
-    income_levels_to_show = [level for level in range(start, start + 60, 10)]
+    # Show INCOME_LEVELS_COUNT levels in steps of INCOME_LEVEL_STEP, centered around selected income
+    final_digit = ink_pct % INCOME_LEVEL_STEP  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
+    start = ink_pct - INCOME_LEVEL_OFFSET
+    max_start = 200 - (INCOME_LEVELS_COUNT * INCOME_LEVEL_STEP) + final_digit
+    start = max(100 + final_digit, min(max_start, start))  # Clamp to 100-200 range
+    income_levels_to_show = list(range(start, start + INCOME_LEVELS_COUNT * INCOME_LEVEL_STEP, INCOME_LEVEL_STEP))
 
     results = []
 
@@ -296,7 +306,7 @@ def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
         # Filter and calculate values and reindex to include all municipalities
         filtered_df = (
             filter_regelingen(df, gm_lbl.keys(), hh, round(ink_lvl / 100, 2), refper, cav, fr)
-            .groupby('GMcode')['WRD'].sum().div(12)
+            .groupby('GMcode')['WRD'].sum().div(MONTHS_PER_YEAR)
             .reindex(gm_lbl.keys(), fill_value=0.0))
 
         # Create dataframe
@@ -321,7 +331,7 @@ def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
 
         results.append({
             'Inkomen': income_pct,  # Store as percentage (integer)
-            'Waarde': filtered_df['WRD'].sum() / 12
+            'Waarde': filtered_df['WRD'].sum() / MONTHS_PER_YEAR
         })
 
     return pd.DataFrame(results)
@@ -435,7 +445,7 @@ def in_formeel_data(df, hh, gm_lbl, ink=1, refper=0, cav=0):
     # Group and aggregate WRD only (no need to aggregate Gemeentenaam)
     filtered_df = (
         filter_regelingen(df, gm_lbl.keys(), hh, ink, refper, cav)
-        .groupby(['GMcode', 'FR'])['WRD'].sum().div(12)
+        .groupby(['GMcode', 'FR'])['WRD'].sum().div(MONTHS_PER_YEAR)
     )
 
     # Unstack FR to get Formeel/Informeel columns
@@ -524,8 +534,8 @@ def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
 
     # Add calculated columns
     filtered_df = filtered_df.assign(
-        monthly_wrd=filtered_df['WRD'] / 12,
-        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / 12
+        monthly_wrd=filtered_df['WRD'] / MONTHS_PER_YEAR,
+        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / MONTHS_PER_YEAR
     )
 
     # Group by municipality and aggregate
@@ -581,7 +591,7 @@ def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0,
             y=threshold_data['Waarde'],
             mode='markers',
             marker=dict(
-                size=threshold_data['Inwoners'] / 200,
+                size=threshold_data['Inwoners'] / BUBBLE_SIZE_DIVISOR,
                 color=threshold_data['marker_color'],
                 opacity=threshold_data['marker_opacity'],
                 sizemode='area'
@@ -639,7 +649,7 @@ def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
 
     # Add computed columns
     regs['Regeling'] = regs['N4']
-    regs['Waarde'] = regs[f'WRD_{hh}'] / 12
+    regs['Waarde'] = regs[f'WRD_{hh}'] / MONTHS_PER_YEAR
     regs['Inkomensgrens'] = regs[f'IG_{hh}']
     regs['Matches'] = regs['ID'].isin(selected_regs['ID'])
 
