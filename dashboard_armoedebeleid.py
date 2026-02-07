@@ -26,6 +26,11 @@ INCOME_LEVELS_COUNT = 6             # Number of income levels shown as markers (
 INCOME_LEVEL_STEP = 10              # Step between income levels in percentage points
 INCOME_LEVEL_OFFSET = 20            # Offset below selected income to start
 BUBBLE_SIZE_DIVISOR = 200           # Divides population to get marker area (Graph 4)
+FR_FORMAL_ONLY = 1                  # filter_regelingen fr: formal regulations only
+FR_INFORMAL_ONLY = 2                # filter_regelingen fr: informal regulations only
+FR_BOTH = 3                         # filter_regelingen fr: both formal and informal
+CAV_EXCLUDE = 0                     # filter_regelingen cav: exclude health insurance discount
+CAV_INCLUDE = 1                     # filter_regelingen cav: include health insurance discount
 
 # ================================================================================
 # PAGE CONFIGURATION
@@ -142,14 +147,14 @@ def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
         gm = [gm]
     mask &= df['GMcode'].isin(gm)
 
-    if cav == 1:
+    if cav == CAV_INCLUDE:
         mask &= ((df['BT'] == 1) | (df['CAV'] == 1))
     else:
         mask &= (df['BT'] == 1) & (df['CAV'] == 0)
 
-    if fr == 1:
+    if fr == FR_FORMAL_ONLY:
         mask &= (df['FR'] == 'Ja')
-    elif fr == 2:
+    elif fr == FR_INFORMAL_ONLY:
         mask &= (df['FR'] == 'Nee')
 
     return df[mask].rename(columns={
