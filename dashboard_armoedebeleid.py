@@ -535,7 +535,10 @@ def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
 
     result.columns = ['Gemeente', 'Waarde', 'weighted_sum', 'Inwoners', 'Gemeentenaam']
 
-    # Filter out zero values and calculate income threshold
+    # Filter out zero values to prevent division by zero
+    result = result[result['Waarde'] > 0].copy()
+
+    # Calculate income threshold
     result['Inkomensgrens'] = ((1 + (result['weighted_sum'] / result['Waarde']))*100).astype(int)
 
     return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
