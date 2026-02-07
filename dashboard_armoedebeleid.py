@@ -789,16 +789,14 @@ try:
         if "prev_reg_types" not in st.session_state:
             st.session_state.prev_reg_types = st.session_state.reg_types
 
-        # Check before rendering: if current value is empty, fix it based on previous selection
+        # If the user deselected the last option, toggle to the other type (never allow empty)
         if not st.session_state.reg_types:
-            if len(st.session_state.prev_reg_types) == 1:
-                # If only one was selected, switch to the other one
-                if "Formeel" in st.session_state.prev_reg_types:
-                    st.session_state.reg_types = ["Informeel"]
-                else:
-                    st.session_state.reg_types = ["Formeel"]
+            prev = st.session_state.prev_reg_types
+            if prev == ["Formeel"]:
+                st.session_state.reg_types = ["Informeel"]
+            elif prev == ["Informeel"]:
+                st.session_state.reg_types = ["Formeel"]
             else:
-                # Default to both if we can't determine
                 st.session_state.reg_types = ["Formeel", "Informeel"]
 
         # Regulation type values: Formeel=1, Informeel=2, both=3
