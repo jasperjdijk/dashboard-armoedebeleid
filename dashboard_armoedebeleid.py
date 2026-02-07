@@ -228,7 +228,6 @@ def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr
                     ),
                     hovertext=data['hover_text'],
                     hoverinfo='text',
-                    customdata=data['GMcode'].values,
                     showlegend=False,
                     fillcolor='rgba(255,255,255,0)',
                     line=dict(color='rgba(255,255,255,0)')
