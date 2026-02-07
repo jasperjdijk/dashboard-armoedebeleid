@@ -535,7 +535,10 @@ def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
 
     result.columns = ['Gemeente', 'Waarde', 'weighted_sum', 'Inwoners', 'Gemeentenaam']
 
-    # Filter out zero values and calculate income threshold
+    # Filter out zero values to prevent division by zero
+    result = result[result['Waarde'] > 0].copy()
+
+    # Calculate income threshold
     result['Inkomensgrens'] = ((1 + (result['weighted_sum'] / result['Waarde']))*100).astype(int)
 
     return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
@@ -939,7 +942,7 @@ try:
             income_markers_df = inkomensgroepen_data(
                 df, sel_hh, gm_lbl, sel_ink_pct, sel_refper, sel_cav, sel_fr
             )
-            income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] * 100).round(0).astype(int).astype(str) + '%'
+            income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] / 100).round(2)
             export_df = income_markers_df[['Inkomensniveau', 'Gemeentenaam', 'Waarde']].copy()
             export_df.columns = ['Inkomensniveau', 'Gemeente', 'Waarde (€ per maand)']
             export_df = export_df.sort_values(['Gemeente', 'Inkomensniveau'])
@@ -980,8 +983,7 @@ try:
                 df, list(gm_lbl.keys()), sel_hh, sel_refper, sel_cav,
                 sel_fr
             )
-            threshold_data['Inkomensgrens_Pct'] = (threshold_data['Inkomensgrens'] * 100).round(0).astype(int)
-            export_df = threshold_data[['Gemeentenaam', 'Inkomensgrens_Pct', 'Waarde', 'Inwoners']].copy()
+            export_df = threshold_data[['Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']].copy()
             export_df.columns = ['Gemeente', 'Gewogen gemiddelde inkomensgrens (%)', 'Waarde bij 100% (€ per maand)', 'Inwoners']
             export_df = export_df.sort_values('Gemeente')
             csv_data = export_df.to_csv(index=False).encode('utf-8')
