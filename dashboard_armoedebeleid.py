@@ -313,34 +313,16 @@ def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
 
 @st.cache_data
 def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
-    """Calculate values for selected municipality at all income levels (Graph 2 line).
-
-    Optimised: applies all filters except income once, then only varies the
-    income threshold on the (much smaller) pre-filtered subset.
-    """
-    wrd_col, ig_col, ref_col = f'WRD_{hh}', f'IG_{hh}', f'Referteperiode_{hh}'
-
-    # Apply all filters except income threshold once
-    mask = (_df['WB'] == 1) & (_df[ref_col] <= refper) & (_df['GMcode'] == gm)
-
-    if cav == 1:
-        mask &= ((_df['BT'] == 1) | (_df['CAV'] == 1))
-    else:
-        mask &= (_df['BT'] == 1) & (_df['CAV'] == 0)
-
-    if fr == 1:
-        mask &= (_df['FR'] == 'Ja')
-    elif fr == 2:
-        mask &= (_df['FR'] == 'Nee')
-
-    base_df = _df.loc[mask, [ig_col, wrd_col]]
-
-    # Vary only the income threshold on the pre-filtered set
+    """Calculate values for selected municipality at all income levels (Graph 2 line)."""
+    all_income_levels_pct = range(100, 201)
     results = []
-    for income_pct in range(100, 201):
-        ink = income_pct / 100
-        value = base_df.loc[base_df[ig_col] >= ink, wrd_col].sum() / 12
-        results.append({'Inkomen': income_pct, 'Waarde': value})
+    for income_pct in all_income_levels_pct:
+        filtered_df = filter_regelingen(_df, gm, hh, income_pct / 100, refper, cav, fr)
+
+        results.append({
+            'Inkomen': income_pct,  # Store as percentage (integer)
+            'Waarde': filtered_df['WRD'].sum() / 12
+        })
 
     return pd.DataFrame(results)
 
