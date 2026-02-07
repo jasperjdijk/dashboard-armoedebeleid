@@ -13,10 +13,26 @@ Visualizations:
 
 """
 
+from __future__ import annotations
+
 import os
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+
+# ================================================================================
+# CONSTANTS
+# ================================================================================
+MONTHS_PER_YEAR = 12                # Annual-to-monthly conversion
+INCOME_LEVELS_COUNT = 6             # Number of income levels shown as markers (Graph 2)
+INCOME_LEVEL_STEP = 10              # Step between income levels in percentage points
+INCOME_LEVEL_OFFSET = 20            # Offset below selected income to start
+BUBBLE_SIZE_DIVISOR = 200           # Divides population to get marker area (Graph 4)
+FR_FORMAL_ONLY = 1                  # filter_regelingen fr: formal regulations only
+FR_INFORMAL_ONLY = 2                # filter_regelingen fr: informal regulations only
+FR_BOTH = 3                         # filter_regelingen fr: both formal and informal
+CAV_EXCLUDE = 0                     # filter_regelingen cav: exclude health insurance discount
+CAV_INCLUDE = 1                     # filter_regelingen cav: include health insurance discount
 
 # ================================================================================
 # PAGE CONFIGURATION
@@ -66,8 +82,8 @@ COLOR_INFORMAL_OTHER = CHART_COLORS[2]     # #C5C5C5 - Other informal regulation
 # ================================================================================
 
 @st.cache_data
-def load_data(key):
-    """Load all required data from Parquet file and filter by municipality access"""
+def load_data(key: str | None) -> pd.DataFrame:
+    """Load all required data from Parquet file and filter by municipality access."""
     # Support both Streamlit secrets.toml and environment variables (for Cloud Run)
     try:
         data_url = st.secrets["excel_url"]
@@ -96,13 +112,13 @@ def load_data(key):
     return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '') & ~df['Gemeentenaam'].isin(excluded_municipalities)]
 
 
-def format_dutch_currency(value, decimals=0):
+def format_dutch_currency(value: float, decimals: int = 0) -> str:
     """Format number as Dutch currency (dot for thousands, comma for decimals)."""
     formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"€ {formatted}"
 
 
-def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
+def filter_regelingen(df: pd.DataFrame, gm: str | list[str], hh: str, ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """
     Apply standard filters to the dataframe and return a boolean mask.
 
@@ -133,14 +149,14 @@ def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
         gm = [gm]
     mask &= df['GMcode'].isin(gm)
 
-    if cav == 1:
+    if cav == CAV_INCLUDE:
         mask &= ((df['BT'] == 1) | (df['CAV'] == 1))
     else:
         mask &= (df['BT'] == 1) & (df['CAV'] == 0)
 
-    if fr == 1:
+    if fr == FR_FORMAL_ONLY:
         mask &= (df['FR'] == 'Ja')
-    elif fr == 2:
+    elif fr == FR_INFORMAL_ONLY:
         mask &= (df['FR'] == 'Nee')
 
     return df[mask].rename(columns={
@@ -153,7 +169,7 @@ def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
 # FUNCTIONS FOR GRAPH 1
 # ================================================================================
 
-def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
+def huishoudtypen_data(df: pd.DataFrame, gm_lbl: dict[str, str], hh_lbl: dict[str, str], ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate values for all municipalities and all household types (Graph 1).
 
     Note: each household type filters on different columns (WRD_HH01, IG_HH01, etc.),
@@ -165,7 +181,7 @@ def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
         # Filter and calculate values and reindex to include all municipalities
         filtered_df = (
             filter_regelingen(df, gm_lbl.keys(), hh, ink, refper, cav, fr)
-            .groupby('GMcode')['WRD'].sum().div(12)
+            .groupby('GMcode')['WRD'].sum().div(MONTHS_PER_YEAR)
             .reindex(gm_lbl.keys(), fill_value=0.0)
         )
 
@@ -181,7 +197,7 @@ def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
 
     return pd.concat(results, ignore_index=True)
 
-def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
+def huishoudtypen_grafiek(df: pd.DataFrame, sel_gm: str, gm_lbl: dict[str, str], hh_lbl: dict[str, str], ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> go.Figure:
     """Create box plot figure for household comparison (Graph 1)."""
 
     # Get data
@@ -281,14 +297,15 @@ def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr
 # FUNCTIONS FOR GRAPH 2
 # ================================================================================
 
-def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
+def inkomensgroepen_data(df: pd.DataFrame, hh: str, gm_lbl: dict[str, str], ink_pct: int = 100, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
     # Calculate income levels to show based on selected income percentage (100-200)
-    # Show 6 levels in steps of 10, centered around selected income (start 20 below)
-    final_digit = ink_pct % 10  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
-    start = ink_pct - 20
-    start = max(100 + final_digit, min(140 + final_digit, start))  # Clamp to 100-200 range
-    income_levels_to_show = [level for level in range(start, start + 60, 10)]
+    # Show INCOME_LEVELS_COUNT levels in steps of INCOME_LEVEL_STEP, centered around selected income
+    final_digit = ink_pct % INCOME_LEVEL_STEP  # Preserve digit alignment (e.g., 105, 115, 125 for ink_pct=115)
+    start = ink_pct - INCOME_LEVEL_OFFSET
+    max_start = 200 - (INCOME_LEVELS_COUNT * INCOME_LEVEL_STEP) + final_digit
+    start = max(100 + final_digit, min(max_start, start))  # Clamp to 100-200 range
+    income_levels_to_show = list(range(start, start + INCOME_LEVELS_COUNT * INCOME_LEVEL_STEP, INCOME_LEVEL_STEP))
 
     results = []
 
@@ -296,7 +313,7 @@ def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
         # Filter and calculate values and reindex to include all municipalities
         filtered_df = (
             filter_regelingen(df, gm_lbl.keys(), hh, round(ink_lvl / 100, 2), refper, cav, fr)
-            .groupby('GMcode')['WRD'].sum().div(12)
+            .groupby('GMcode')['WRD'].sum().div(MONTHS_PER_YEAR)
             .reindex(gm_lbl.keys(), fill_value=0.0))
 
         # Create dataframe
@@ -312,7 +329,7 @@ def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
     return pd.concat(results, ignore_index=True)
 
 @st.cache_data
-def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
+def inkomenslijn_data(_df: pd.DataFrame, gm: str, hh: str, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate values for selected municipality at all income levels (Graph 2 line)."""
     all_income_levels_pct = range(100, 201)
     results = []
@@ -321,13 +338,13 @@ def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
 
         results.append({
             'Inkomen': income_pct,  # Store as percentage (integer)
-            'Waarde': filtered_df['WRD'].sum() / 12
+            'Waarde': filtered_df['WRD'].sum() / MONTHS_PER_YEAR
         })
 
     return pd.DataFrame(results)
 
 
-def inkomensgroepen_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
+def inkomensgroepen_grafiek(df: pd.DataFrame, sel_gm: str, hh: str, hh_lbl: dict[str, str], gm_lbl: dict[str, str], ink_pct: int = 100, refper: int = 0, cav: int = 0, fr: int = 3) -> go.Figure:
     """Create line chart figure for income progression (Graph 2)."""
     inkomensgroepen_fig = go.Figure()
 
@@ -430,12 +447,12 @@ def inkomensgroepen_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=
 # FUNCTIONS FOR GRAPH 3
 # ================================================================================
 
-def in_formeel_data(df, hh, gm_lbl, ink=1, refper=0, cav=0):
+def in_formeel_data(df: pd.DataFrame, hh: str, gm_lbl: dict[str, str], ink: float = 1, refper: int = 0, cav: int = 0) -> pd.DataFrame:
     """Calculate formal and informal values for all municipalities (Graph 3)."""
     # Group and aggregate WRD only (no need to aggregate Gemeentenaam)
     filtered_df = (
         filter_regelingen(df, gm_lbl.keys(), hh, ink, refper, cav)
-        .groupby(['GMcode', 'FR'])['WRD'].sum().div(12)
+        .groupby(['GMcode', 'FR'])['WRD'].sum().div(MONTHS_PER_YEAR)
     )
 
     # Unstack FR to get Formeel/Informeel columns
@@ -459,7 +476,7 @@ def in_formeel_data(df, hh, gm_lbl, ink=1, refper=0, cav=0):
 
     return result[['GMcode', 'Gemeentenaam', 'Formeel', 'Informeel', 'Totaal']]
 
-def in_formeel_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, cav=0):
+def in_formeel_grafiek(df: pd.DataFrame, sel_gm: str, hh: str, hh_lbl: dict[str, str], gm_lbl: dict[str, str], ink_pct: int = 100, refper: int = 0, cav: int = 0) -> go.Figure:
     """Create stacked bar chart for formal vs informal regulations (Graph 3)."""
     # Get cached formal/informal data
     bar_data = in_formeel_data(
@@ -517,15 +534,15 @@ def in_formeel_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, ca
 # FUNCTIONS FOR GRAPH 4
 # ================================================================================
 
-def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
+def gem_inkomensgrenzen_data(df: pd.DataFrame, gm: list[str], hh: str, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
     # Filter once for all municipalities (instead of once per municipality)
     filtered_df = filter_regelingen(df, gm, hh, 1, refper, cav, fr)
 
     # Add calculated columns
     filtered_df = filtered_df.assign(
-        monthly_wrd=filtered_df['WRD'] / 12,
-        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / 12
+        monthly_wrd=filtered_df['WRD'] / MONTHS_PER_YEAR,
+        weighted_component=filtered_df['WRD'] * (filtered_df['IG'] - 1) / MONTHS_PER_YEAR
     )
 
     # Group by municipality and aggregate
@@ -546,7 +563,7 @@ def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
 
     return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
 
-def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0, fr=3):
+def gem_inkomensgrenzen_grafiek(df: pd.DataFrame, sel_gm: str, all_gm: list[str], hh: str, hh_lbl: dict[str, str], refper: int = 0, cav: int = 0, fr: int = 3) -> go.Figure:
     """Create scatter plot for value vs income threshold (Graph 4)."""
     # Get cached threshold data
     threshold_data = gem_inkomensgrenzen_data(
@@ -581,7 +598,7 @@ def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0,
             y=threshold_data['Waarde'],
             mode='markers',
             marker=dict(
-                size=threshold_data['Inwoners'] / 200,
+                size=threshold_data['Inwoners'] / BUBBLE_SIZE_DIVISOR,
                 color=threshold_data['marker_color'],
                 opacity=threshold_data['marker_opacity'],
                 sizemode='area'
@@ -630,7 +647,7 @@ def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0,
 # FUNCTIONS FOR TABLES
 # ================================================================================
 
-def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
+def regelingen_lijst(df: pd.DataFrame, gm: str, hh: str, ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     # Get all regulations for this municipality
     regs = df[df['GMcode'] == gm].copy()
 
@@ -639,7 +656,7 @@ def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
 
     # Add computed columns
     regs['Regeling'] = regs['N4']
-    regs['Waarde'] = regs[f'WRD_{hh}'] / 12
+    regs['Waarde'] = regs[f'WRD_{hh}'] / MONTHS_PER_YEAR
     regs['Inkomensgrens'] = regs[f'IG_{hh}']
     regs['Matches'] = regs['ID'].isin(selected_regs['ID'])
 
@@ -772,16 +789,14 @@ try:
         if "prev_reg_types" not in st.session_state:
             st.session_state.prev_reg_types = st.session_state.reg_types
 
-        # Check before rendering: if current value is empty, fix it based on previous selection
+        # If the user deselected the last option, toggle to the other type (never allow empty)
         if not st.session_state.reg_types:
-            if len(st.session_state.prev_reg_types) == 1:
-                # If only one was selected, switch to the other one
-                if "Formeel" in st.session_state.prev_reg_types:
-                    st.session_state.reg_types = ["Informeel"]
-                else:
-                    st.session_state.reg_types = ["Formeel"]
+            prev = st.session_state.prev_reg_types
+            if prev == ["Formeel"]:
+                st.session_state.reg_types = ["Informeel"]
+            elif prev == ["Informeel"]:
+                st.session_state.reg_types = ["Formeel"]
             else:
-                # Default to both if we can't determine
                 st.session_state.reg_types = ["Formeel", "Informeel"]
 
         # Regulation type values: Formeel=1, Informeel=2, both=3
