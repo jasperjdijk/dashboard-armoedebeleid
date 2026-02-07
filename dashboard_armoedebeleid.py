@@ -13,6 +13,8 @@ Visualizations:
 
 """
 
+from __future__ import annotations
+
 import os
 import streamlit as st
 import pandas as pd
@@ -80,8 +82,8 @@ COLOR_INFORMAL_OTHER = CHART_COLORS[2]     # #C5C5C5 - Other informal regulation
 # ================================================================================
 
 @st.cache_data
-def load_data(key):
-    """Load all required data from Parquet file and filter by municipality access"""
+def load_data(key: str | None) -> pd.DataFrame:
+    """Load all required data from Parquet file and filter by municipality access."""
     # Support both Streamlit secrets.toml and environment variables (for Cloud Run)
     try:
         data_url = st.secrets["excel_url"]
@@ -110,13 +112,13 @@ def load_data(key):
     return df[df['Gemeentenaam'].notna() & (df['Gemeentenaam'] != '') & ~df['Gemeentenaam'].isin(excluded_municipalities)]
 
 
-def format_dutch_currency(value, decimals=0):
+def format_dutch_currency(value: float, decimals: int = 0) -> str:
     """Format number as Dutch currency (dot for thousands, comma for decimals)."""
     formatted = f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     return f"€ {formatted}"
 
 
-def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
+def filter_regelingen(df: pd.DataFrame, gm: str | list[str], hh: str, ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """
     Apply standard filters to the dataframe and return a boolean mask.
 
@@ -167,7 +169,7 @@ def filter_regelingen(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
 # FUNCTIONS FOR GRAPH 1
 # ================================================================================
 
-def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
+def huishoudtypen_data(df: pd.DataFrame, gm_lbl: dict[str, str], hh_lbl: dict[str, str], ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate values for all municipalities and all household types (Graph 1).
 
     Note: each household type filters on different columns (WRD_HH01, IG_HH01, etc.),
@@ -195,7 +197,7 @@ def huishoudtypen_data(df, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
 
     return pd.concat(results, ignore_index=True)
 
-def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr=3):
+def huishoudtypen_grafiek(df: pd.DataFrame, sel_gm: str, gm_lbl: dict[str, str], hh_lbl: dict[str, str], ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> go.Figure:
     """Create box plot figure for household comparison (Graph 1)."""
 
     # Get data
@@ -295,7 +297,7 @@ def huishoudtypen_grafiek(df, sel_gm, gm_lbl, hh_lbl, ink=1, refper=0, cav=0, fr
 # FUNCTIONS FOR GRAPH 2
 # ================================================================================
 
-def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
+def inkomensgroepen_data(df: pd.DataFrame, hh: str, gm_lbl: dict[str, str], ink_pct: int = 100, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate values for all municipalities at specific income levels (Graph 2 markers)."""
     # Calculate income levels to show based on selected income percentage (100-200)
     # Show INCOME_LEVELS_COUNT levels in steps of INCOME_LEVEL_STEP, centered around selected income
@@ -327,7 +329,7 @@ def inkomensgroepen_data(df, hh, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
     return pd.concat(results, ignore_index=True)
 
 @st.cache_data
-def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
+def inkomenslijn_data(_df: pd.DataFrame, gm: str, hh: str, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate values for selected municipality at all income levels (Graph 2 line)."""
     all_income_levels_pct = range(100, 201)
     results = []
@@ -342,7 +344,7 @@ def inkomenslijn_data(_df, gm, hh, refper=0, cav=0, fr=3):
     return pd.DataFrame(results)
 
 
-def inkomensgroepen_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, cav=0, fr=3):
+def inkomensgroepen_grafiek(df: pd.DataFrame, sel_gm: str, hh: str, hh_lbl: dict[str, str], gm_lbl: dict[str, str], ink_pct: int = 100, refper: int = 0, cav: int = 0, fr: int = 3) -> go.Figure:
     """Create line chart figure for income progression (Graph 2)."""
     inkomensgroepen_fig = go.Figure()
 
@@ -445,7 +447,7 @@ def inkomensgroepen_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=
 # FUNCTIONS FOR GRAPH 3
 # ================================================================================
 
-def in_formeel_data(df, hh, gm_lbl, ink=1, refper=0, cav=0):
+def in_formeel_data(df: pd.DataFrame, hh: str, gm_lbl: dict[str, str], ink: float = 1, refper: int = 0, cav: int = 0) -> pd.DataFrame:
     """Calculate formal and informal values for all municipalities (Graph 3)."""
     # Group and aggregate WRD only (no need to aggregate Gemeentenaam)
     filtered_df = (
@@ -474,7 +476,7 @@ def in_formeel_data(df, hh, gm_lbl, ink=1, refper=0, cav=0):
 
     return result[['GMcode', 'Gemeentenaam', 'Formeel', 'Informeel', 'Totaal']]
 
-def in_formeel_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, cav=0):
+def in_formeel_grafiek(df: pd.DataFrame, sel_gm: str, hh: str, hh_lbl: dict[str, str], gm_lbl: dict[str, str], ink_pct: int = 100, refper: int = 0, cav: int = 0) -> go.Figure:
     """Create stacked bar chart for formal vs informal regulations (Graph 3)."""
     # Get cached formal/informal data
     bar_data = in_formeel_data(
@@ -532,7 +534,7 @@ def in_formeel_grafiek(df, sel_gm, hh, hh_lbl, gm_lbl, ink_pct=100, refper=0, ca
 # FUNCTIONS FOR GRAPH 4
 # ================================================================================
 
-def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
+def gem_inkomensgrenzen_data(df: pd.DataFrame, gm: list[str], hh: str, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     """Calculate weighted income thresholds and values for all municipalities (Graph 4)."""
     # Filter once for all municipalities (instead of once per municipality)
     filtered_df = filter_regelingen(df, gm, hh, 1, refper, cav, fr)
@@ -561,7 +563,7 @@ def gem_inkomensgrenzen_data(df, gm, hh, refper=0, cav=0, fr=3):
 
     return result[['Gemeente', 'Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']]
 
-def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0, fr=3):
+def gem_inkomensgrenzen_grafiek(df: pd.DataFrame, sel_gm: str, all_gm: list[str], hh: str, hh_lbl: dict[str, str], refper: int = 0, cav: int = 0, fr: int = 3) -> go.Figure:
     """Create scatter plot for value vs income threshold (Graph 4)."""
     # Get cached threshold data
     threshold_data = gem_inkomensgrenzen_data(
@@ -645,7 +647,7 @@ def gem_inkomensgrenzen_grafiek(df, sel_gm, all_gm, hh, hh_lbl, refper=0, cav=0,
 # FUNCTIONS FOR TABLES
 # ================================================================================
 
-def regelingen_lijst(df, gm, hh, ink=1, refper=0, cav=0, fr=3):
+def regelingen_lijst(df: pd.DataFrame, gm: str, hh: str, ink: float = 1, refper: int = 0, cav: int = 0, fr: int = 3) -> pd.DataFrame:
     # Get all regulations for this municipality
     regs = df[df['GMcode'] == gm].copy()
 
