@@ -4,9 +4,8 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies required by openpyxl and pandas
+# Install system dependencies (curl for health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
