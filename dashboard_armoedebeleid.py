@@ -634,7 +634,8 @@ def gem_inkomensgrenzen_grafiek(df: pd.DataFrame, sel_gm: str, all_gm: list[str]
         yaxis=dict(
             tickprefix="€ ",
             tickfont=dict(size=14),
-            fixedrange=True
+            fixedrange=True,
+            range=[0, None]
         )
     )
 
@@ -872,7 +873,7 @@ try:
         # Create tabs for the graphs
         tab1, tab2, tab3, tab4 = st.tabs([
             "Huishoudtypen",
-            "Inkomensgroepen",
+            "Inkomensniveaus",
             "(In)formeel",
             "Gemiddelde inkomensgrenzen"
         ])
