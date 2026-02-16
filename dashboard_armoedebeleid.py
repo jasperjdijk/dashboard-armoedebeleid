@@ -774,6 +774,10 @@ try:
             help="Welk huishoudtype wilt u meer over weten?"
         )
 
+        # Prevent deselection of referteperiode (segmented_control returns None when clicked again)
+        if st.session_state.get("referteperiode") is None:
+            st.session_state.referteperiode = default_refper
+
         sel_refper = st.segmented_control(
             label="Jaren met laag inkomen",
             options=[0, 1, 3, 5],
@@ -781,6 +785,10 @@ try:
             key="referteperiode",
             help="Jaren dat het voorbeeldhuishouden al het geselecteerde inkomen heeft (referteperiode)"
         )
+
+        # Defensive fallback: ensure sel_refper is never None
+        if sel_refper is None:
+            sel_refper = 0
 
         # Initialize session state if it doesn't exist - no rerun needed
         if "reg_types" not in st.session_state:
