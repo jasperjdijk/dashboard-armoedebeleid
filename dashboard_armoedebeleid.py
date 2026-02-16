@@ -692,32 +692,6 @@ try:
     }
 
     # ----------------------------------------------------------------------------
-    # Debug diagnostics (add ?debug=1 to URL to show)
-    # ----------------------------------------------------------------------------
-    if st.query_params.get("debug") == "1":
-        with st.expander("Filter diagnostics", expanded=True):
-            hh_test = 'HH01'
-            ig_col = f'IG_{hh_test}'
-            ref_col = f'Referteperiode_{hh_test}'
-            wrd_col = f'WRD_{hh_test}'
-            st.write(f"**Data shape:** {df.shape}")
-            st.write(f"**Column dtypes:** WB={df['WB'].dtype}, BT={df['BT'].dtype}, CAV={df['CAV'].dtype}, "
-                     f"{ig_col}={df[ig_col].dtype}, {ref_col}={df[ref_col].dtype}, {wrd_col}={df[wrd_col].dtype}")
-            st.write(f"**WB unique values (first 10):** {df['WB'].unique()[:10].tolist()}")
-            st.write(f"**BT unique values (first 10):** {df['BT'].unique()[:10].tolist()}")
-            st.write(f"**CAV unique values (first 10):** {df['CAV'].unique()[:10].tolist()}")
-            st.write(f"**{ig_col} range:** {df[ig_col].min()} - {df[ig_col].max()}")
-            st.write(f"**{ref_col} unique:** {sorted(df[ref_col].dropna().unique().tolist())}")
-            st.write(f"**WB==1:** {(df['WB'] == 1).sum()} / {len(df)}")
-            st.write(f"**BT==1:** {(df['BT'] == 1).sum()} / {len(df)}")
-            st.write(f"**CAV==0:** {(df['CAV'] == 0).sum()} / {len(df)}")
-            st.write(f"**BT==1 & CAV==0:** {((df['BT'] == 1) & (df['CAV'] == 0)).sum()} / {len(df)}")
-            st.write(f"**{ig_col} >= 1.0:** {(df[ig_col] >= 1.0).sum()} / {len(df)}")
-            st.write(f"**{ref_col} <= 0:** {(df[ref_col] <= 0).sum()} / {len(df)}")
-            full_mask = (df['WB'] == 1) & (df[ig_col] >= 1.0) & (df[ref_col] <= 0) & (df['BT'] == 1) & (df['CAV'] == 0)
-            st.write(f"**Full default filter match:** {full_mask.sum()} / {len(df)}")
-
-    # ----------------------------------------------------------------------------
     # Header and Gemeente Labels Preparation
     # ----------------------------------------------------------------------------
     st.title("Dashboard armoedebeleid", text_alignment="center", anchor=False)
@@ -875,8 +849,10 @@ try:
     sel_cav = 1 if toggle_cav else 0
     new_params["reg"] = str(sel_fr)
     new_params["cav"] = str(sel_cav)
-    # Only update query params if they changed
-    if dict(st.query_params) != new_params:
+    # Only update query params if managed params actually changed
+    # Compare only the keys we manage (not embed, export, or other external params)
+    current_managed = {k: st.query_params.get(k) for k in new_params}
+    if current_managed != new_params:
         st.query_params.update(new_params)
 
     # Create two-column layout: graphs on left, table on right
