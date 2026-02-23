@@ -680,6 +680,13 @@ try:
     # ----------------------------------------------------------------------------
     # Data Preparation
     # ----------------------------------------------------------------------------
+
+    # Hidden cache-clear URL: add ?clear_cache=1 to force reload of cached data
+    if st.query_params.get("clear_cache") == "1":
+        st.cache_data.clear()
+        del st.query_params["clear_cache"]
+        st.rerun()
+
     data_key = st.query_params.get("key")
     df = load_data(data_key)
 
@@ -781,6 +788,9 @@ try:
             key="referteperiode",
             help="Jaren dat het voorbeeldhuishouden al het geselecteerde inkomen heeft (referteperiode)"
         )
+        # st.segmented_control returns None when deselected; fall back to default
+        if sel_refper is None:
+            sel_refper = default_refper
 
         # Initialize session state if it doesn't exist - no rerun needed
         if "reg_types" not in st.session_state:
@@ -841,8 +851,9 @@ try:
     sel_cav = 1 if toggle_cav else 0
     new_params["reg"] = str(sel_fr)
     new_params["cav"] = str(sel_cav)
-    # Only update query params if they changed
-    if dict(st.query_params) != new_params:
+    # Only update query params if they changed (compare only managed keys, ignoring external params)
+    current_managed = {k: st.query_params[k] for k in new_params if k in st.query_params}
+    if current_managed != new_params:
         st.query_params.update(new_params)
 
     # Create two-column layout: graphs on left, table on right
