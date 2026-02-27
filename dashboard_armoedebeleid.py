@@ -708,6 +708,7 @@ try:
                        .dropna()
                        .drop_duplicates()
                        .astype(str)
+                       .sort_values('Gemeentenaam')
                        .set_index('GMcode')['Gemeentenaam']
                        .to_dict())
 
