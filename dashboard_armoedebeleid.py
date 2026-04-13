@@ -479,7 +479,7 @@ def in_formeel_grafiek(df: pd.DataFrame, sel_gm: str, hh: str, hh_lbl: dict[str,
     # Get cached formal/informal data
     bar_data = in_formeel_data(
         df, hh, gm_lbl, ink_pct / 100, refper, cav
-    ).sort_values('Formeel', ascending=False)
+    ).sort_values(['Formeel', 'Informeel'], ascending=False)
 
     # Add visual properties and hover text to dataframe
     is_selected = bar_data['GMcode'] == sel_gm

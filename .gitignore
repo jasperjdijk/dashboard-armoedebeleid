@@ -18,6 +18,7 @@ dataoverzicht_dashboard_armoedebeleid.xlsx
 *.parquet
 
 # Virtual environment
+.venv/
 venv/
 env/
 ENV/
