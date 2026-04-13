@@ -14,6 +14,8 @@ oud/
 # Project-specific files to keep local only
 .claude/
 CLAUDE.md
+DEPLOYMENT.md
+deploy.bat
 dataoverzicht_dashboard_armoedebeleid.xlsx
 *.parquet
 

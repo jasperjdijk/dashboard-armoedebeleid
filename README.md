@@ -21,10 +21,19 @@ pip install -r requirements.txt
 
 Run the following command in your terminal:
 ```bash
-streamlit run app.py
+streamlit run dashboard_armoedebeleid.py
 ```
 
 The app will open in your default web browser at `http://localhost:8501`
+
+## Deployment
+
+Quick update flow:
+```cmd
+deploy.bat
+```
+
+For the full project-specific Cloud Run notes, see [DEPLOYMENT.md](/c:/Users/Jasper%20J/Code/dashboard-armoedebeleid/DEPLOYMENT.md).
 
 ## Data
 
