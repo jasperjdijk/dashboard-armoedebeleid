@@ -955,9 +955,10 @@ try:
             export_df = plot_df[['Huishouden', 'Gemeentenaam', 'Waarde']].copy()
             export_df['Huishoudtype'] = export_df['Huishouden'].map(hh_lbl)
             export_df = export_df[['Huishoudtype', 'Gemeentenaam', 'Waarde']]
+            export_df = export_df.assign(Waarde=export_df['Waarde'].round(2))
             export_df.columns = ['Huishoudtype', 'Gemeente', 'Waarde (€ per maand)']
             export_df = export_df.sort_values(['Huishoudtype', 'Gemeente'])
-            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            csv_data = export_df.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
             st.download_button(
                 label="Huishoudtypen",
                 data=csv_data,
@@ -973,9 +974,22 @@ try:
             )
             income_markers_df['Inkomensniveau'] = (income_markers_df['Inkomen'] / 100).round(2)
             export_df = income_markers_df[['Inkomensniveau', 'Gemeentenaam', 'Waarde']].copy()
+
+            # Add red line data: selected municipality at all income levels 100-200
+            line_df = inkomenslijn_data(df, sel_gm, sel_hh, sel_refper, sel_cav, sel_fr)
+            line_export = pd.DataFrame({
+                'Inkomensniveau': (line_df['Inkomen'] / 100).round(2),
+                'Gemeentenaam': gm_lbl[sel_gm],
+                'Waarde': line_df['Waarde']
+            })
+            export_df = pd.concat([export_df, line_export], ignore_index=True).drop_duplicates(
+                subset=['Inkomensniveau', 'Gemeentenaam']
+            )
+            export_df = export_df.assign(Waarde=export_df['Waarde'].round(2))
+
             export_df.columns = ['Inkomensniveau', 'Gemeente', 'Waarde (€ per maand)']
             export_df = export_df.sort_values(['Gemeente', 'Inkomensniveau'])
-            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            csv_data = export_df.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
             st.download_button(
                 label="Inkomensgroepen",
                 data=csv_data,
@@ -996,8 +1010,9 @@ try:
                 value_name='Waarde (€ per maand)'
             )
             export_df.columns = ['Gemeente', 'Type', 'Waarde (€ per maand)']
+            export_df = export_df.assign(**{'Waarde (€ per maand)': export_df['Waarde (€ per maand)'].round(2)})
             export_df = export_df.sort_values(['Type', 'Gemeente'])
-            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            csv_data = export_df.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
             st.download_button(
                 label="(In)formeel",
                 data=csv_data,
@@ -1013,9 +1028,10 @@ try:
                 sel_fr
             )
             export_df = threshold_data[['Gemeentenaam', 'Inkomensgrens', 'Waarde', 'Inwoners']].copy()
+            export_df = export_df.assign(Waarde=export_df['Waarde'].round(2))
             export_df.columns = ['Gemeente', 'Gewogen gemiddelde inkomensgrens (%)', 'Waarde bij 100% (€ per maand)', 'Inwoners']
             export_df = export_df.sort_values('Gemeente')
-            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            csv_data = export_df.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
             st.download_button(
                 label="Inkomensgrenzen",
                 data=csv_data,
