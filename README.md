@@ -27,13 +27,8 @@ streamlit run dashboard_armoedebeleid.py
 The app will open in your default web browser at `http://localhost:8501`
 
 ## Deployment
-
-Quick update flow:
-```cmd
-deploy.bat
-```
-
-For the full project-specific Cloud Run notes, see [DEPLOYMENT.md](/c:/Users/Jasper%20J/Code/dashboard-armoedebeleid/DEPLOYMENT.md).
+& gcloud config set project dashboard-armoedebeleid
+& gcloud run deploy dashboard-armoedebeleid --source . --region europe-west4 --allow-unauthenticated
 
 ## Data
 
